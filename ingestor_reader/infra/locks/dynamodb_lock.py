@@ -1,8 +1,11 @@
 """DynamoDB lock implementation."""
 import boto3
+import logging
 from datetime import datetime, timezone, timedelta
 from botocore.exceptions import ClientError
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 class DynamoDBLock:
@@ -61,12 +64,26 @@ class DynamoDBLock:
             run_id: Run identifier
         """
         try:
+            # Try to delete with run_id match first
             self.table.delete_item(
                 Key={"dataset_id": dataset_id},
                 ConditionExpression="run_id = :run_id",
                 ExpressionAttributeValues={":run_id": run_id},
             )
         except ClientError as e:
-            if e.response["Error"]["Code"] != "ConditionalCheckFailedException":
+            if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+                # If run_id doesn't match, try to delete if lock is expired
+                now = datetime.now(timezone.utc)
+                try:
+                    self.table.delete_item(
+                        Key={"dataset_id": dataset_id},
+                        ConditionExpression="expires_at < :now",
+                        ExpressionAttributeValues={":now": int(now.timestamp())},
+                    )
+                    logger.warning("Released expired lock for %s (run_id mismatch)", dataset_id)
+                except ClientError as e2:
+                    if e2.response["Error"]["Code"] != "ConditionalCheckFailedException":
+                        raise
+            else:
                 raise
 
