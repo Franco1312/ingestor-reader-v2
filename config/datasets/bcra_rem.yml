@@ -1,0 +1,110 @@
+dataset_id: bcra_rem
+provider: BCRA
+frequency: M
+lag_days: 40
+source:
+  kind: http
+  url: https://www.bcra.gob.ar/Pdfs/PublicacionesEstadisticas/tablas-relevamiento-expectativas-mercado-sep-2025.xlsx
+  format: xlsx
+parse:
+  plugin: bcra_rem
+normalize:
+  plugin: bcra_rem
+  primary_keys:
+    - obs_time
+    - internal_series_code
+  timezone: America/Argentina/Buenos_Aires
+parse_config:
+  header_search_max_rows: 30
+  series_map:
+    - internal_series_code: REM_IPC_NIVEL_GENERAL_EXP_M
+      unit: pct
+      frequency: M
+      sheet: Cuadros de resultados
+      category_title_row: 4
+      header_row: 5
+      start_data_row: 6
+      date_col: B
+      value_col: D
+      drop_na: true
+    - internal_series_code: REM_IPC_NUCLEO_EXP_M
+      unit: pct
+      frequency: M
+      sheet: Cuadros de resultados
+      category_title_row: 20
+      header_row: 21
+      start_data_row: 22
+      date_col: B
+      value_col: D
+      drop_na: true
+    - internal_series_code: REM_TASA_TAMAR_EXP_M
+      unit: pct_TNA
+      frequency: M
+      sheet: Cuadros de resultados
+      category_title_row: 36
+      header_row: 37
+      start_data_row: 38
+      date_col: B
+      value_col: D
+      drop_na: true
+    - internal_series_code: REM_TC_NOMINAL_PESOSxUSD_EXP_M
+      unit: ARS_per_USD
+      frequency: M
+      sheet: Cuadros de resultados
+      category_title_row: 49
+      header_row: 50
+      start_data_row: 51
+      date_col: B
+      value_col: D
+      drop_na: true
+    - internal_series_code: REM_EXPORTACIONES_USD_MILLIONS_EXP_M
+      unit: USD_millions
+      frequency: M
+      sheet: Cuadros de resultados
+      category_title_row: 62
+      header_row: 63
+      start_data_row: 64
+      date_col: B
+      value_col: D
+      drop_na: true
+    - internal_series_code: REM_IMPORTACIONES_USD_MILLIONS_EXP_M
+      unit: USD_millions
+      frequency: M
+      sheet: Cuadros de resultados
+      category_title_row: 75
+      header_row: 76
+      start_data_row: 77
+      date_col: B
+      value_col: D
+      drop_na: true
+    - internal_series_code: REM_RESULTADO_PRIMARIO_SPNF_EXP_M
+      unit: ARS_billions
+      frequency: M
+      sheet: Cuadros de resultados
+      category_title_row: 88
+      header_row: 89
+      start_data_row: 90
+      date_col: B
+      value_col: D
+      drop_na: true
+    - internal_series_code: REM_DESOCUPACION_PEA_EXP_M
+      unit: pct
+      frequency: M
+      sheet: Cuadros de resultados
+      category_title_row: 94
+      header_row: 95
+      start_data_row: 96
+      date_col: B
+      value_col: D
+      drop_na: true
+    - internal_series_code: REM_PIB_PRECIOS_CONSTANTES_EXP_Q
+      unit: pct
+      frequency: Q
+      sheet: Cuadros de resultados
+      category_title_row: 103
+      header_row: 104
+      start_data_row: 105
+      date_col: B
+      value_col: D
+      drop_na: true
+

@@ -1,0 +1,163 @@
+"""Tests for S3 catalog paths."""
+import json
+import pytest
+from unittest.mock import Mock, MagicMock, patch
+import pandas as pd
+
+from ingestor_reader.infra.s3_storage import S3Storage
+from ingestor_reader.infra.s3_catalog import S3Catalog
+from ingestor_reader.domain.entities.manifest import Manifest, OutputsInfo, IndexInfo, QualityInfo
+
+
+def test_s3_catalog_paths():
+    """Test S3 catalog path construction."""
+    s3_storage = Mock(spec=S3Storage)
+    s3_storage.bucket = "test-bucket"
+    catalog = S3Catalog(s3_storage)
+    
+    dataset_id = "TEST_DATASET"
+    run_id = "run-123"
+    version_ts = "2024-01-01T00-00-00"
+    
+    # Test path methods (private, but we can verify structure)
+    assert "datasets" in catalog._config_key(dataset_id)
+    assert dataset_id in catalog._config_key(dataset_id)
+    assert "index" in catalog._index_key(dataset_id)
+    assert "versions" in catalog._version_manifest_key(dataset_id, version_ts)
+    assert "current" in catalog._current_manifest_key(dataset_id)
+    assert "runs" in catalog._run_raw_prefix(dataset_id, run_id)
+    assert "outputs" in catalog._outputs_prefix(dataset_id, version_ts)
+
+
+def test_get_current_manifest_etag():
+    """Test getting current manifest ETag."""
+    s3_storage = Mock(spec=S3Storage)
+    s3_storage.head_object = Mock(return_value={"ETag": "etag123"})
+    catalog = S3Catalog(s3_storage)
+    
+    etag = catalog.get_current_manifest_etag("TEST")
+    assert etag == "etag123"
+    
+    # Test None case
+    s3_storage.head_object = Mock(return_value=None)
+    etag = catalog.get_current_manifest_etag("TEST")
+    assert etag is None
+
+
+def test_read_current_manifest():
+    """Test reading current manifest."""
+    s3_storage = Mock(spec=S3Storage)
+    manifest_data = {"dataset_id": "TEST", "current_version": "v1"}
+    s3_storage.get_object = Mock(return_value=json.dumps(manifest_data).encode())
+    catalog = S3Catalog(s3_storage)
+    
+    manifest = catalog.read_current_manifest("TEST")
+    assert manifest == manifest_data
+    
+    # Test None case
+    from botocore.exceptions import ClientError
+    error = ClientError({"Error": {"Code": "404"}}, "GetObject")
+    s3_storage.get_object = Mock(side_effect=error)
+    manifest = catalog.read_current_manifest("TEST")
+    assert manifest is None
+
+
+def test_put_current_manifest_pointer_cas():
+    """Test CAS pointer update."""
+    s3_storage = Mock(spec=S3Storage)
+    s3_storage.put_object = Mock(return_value="new-etag")
+    catalog = S3Catalog(s3_storage)
+    
+    body = {"dataset_id": "TEST", "current_version": "v1"}
+    etag = catalog.put_current_manifest_pointer("TEST", body, "old-etag")
+    
+    assert etag == "new-etag"
+    s3_storage.put_object.assert_called_once()
+    call_args = s3_storage.put_object.call_args
+    assert call_args[1]["if_match"] == "old-etag"
+    
+    # Test CAS failure
+    from botocore.exceptions import ClientError
+    error = ClientError({"Error": {"Code": "412"}}, "PutObject")
+    s3_storage.put_object = Mock(side_effect=error)
+    
+    with pytest.raises(ValueError, match="Conditional PUT failed"):
+        catalog.put_current_manifest_pointer("TEST", body, "old-etag")
+
+
+def test_write_manifest():
+    """Test writing manifest."""
+    s3_storage = Mock(spec=S3Storage)
+    s3_storage.put_object = Mock(return_value="etag")
+    catalog = S3Catalog(s3_storage)
+    
+    manifest = Manifest(
+        dataset_id="TEST",
+        version="v1",
+        created_at="2024-01-01T00:00:00Z",
+        source={"files": []},
+        outputs=OutputsInfo(
+            data_prefix="prefix/",
+            files=["file1.parquet"],
+            rows_total=10,
+            rows_added_this_version=10,
+        ),
+        index=IndexInfo(
+            path="index/keys.parquet",
+            key_columns=["key"],
+            hash_column="key_hash",
+        ),
+        quality=QualityInfo(lag_days=2),
+    )
+    
+    catalog.write_manifest("TEST", "v1", manifest)
+    s3_storage.put_object.assert_called_once()
+    call_args = s3_storage.put_object.call_args
+    assert "versions" in call_args[0][0]  # key contains versions
+
+
+def test_read_write_index():
+    """Test reading and writing index."""
+    s3_storage = Mock(spec=S3Storage)
+    catalog = S3Catalog(s3_storage)
+    
+    # Mock parquet IO
+    df = pd.DataFrame({"key_hash": ["hash1", "hash2"]})
+    catalog.parquet_io = Mock()
+    catalog.parquet_io.write_to_bytes = Mock(return_value=b"parquet-data")
+    catalog.parquet_io.read_from_bytes = Mock(return_value=df)
+    
+    # Test write
+    catalog.write_index("TEST", df)
+    s3_storage.put_object.assert_called_once()
+    
+    # Test read
+    s3_storage.get_object = Mock(return_value=b"parquet-data")
+    result = catalog.read_index("TEST")
+    assert len(result) == 2
+    assert "key_hash" in result.columns
+    
+    # Test read None
+    from botocore.exceptions import ClientError
+    error = ClientError({"Error": {"Code": "404"}}, "GetObject")
+    s3_storage.get_object = Mock(side_effect=error)
+    result = catalog.read_index("TEST")
+    assert result is None
+
+
+def test_write_outputs():
+    """Test writing outputs."""
+    s3_storage = Mock(spec=S3Storage)
+    catalog = S3Catalog(s3_storage)
+    
+    df = pd.DataFrame({"col1": [1, 2, 3]})
+    catalog.parquet_io = Mock()
+    catalog.parquet_io.write_to_bytes = Mock(return_value=b"parquet-data")
+    
+    keys = catalog.write_outputs("TEST", "v1", df)
+    
+    assert len(keys) == 1
+    assert "outputs" in keys[0]
+    assert "v1" in keys[0]
+    s3_storage.put_object.assert_called_once()
+

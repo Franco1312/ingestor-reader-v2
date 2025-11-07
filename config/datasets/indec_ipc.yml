@@ -1,0 +1,78 @@
+dataset_id: indec_ipc
+provider: INDEC
+frequency: M
+lag_days: 40
+source:
+  kind: http
+  url: https://www.indec.gob.ar/ftp/cuadros/economia/sh_ipc_10_25.xls
+  format: xlsx
+parse:
+  plugin: indec_ipc
+normalize:
+  plugin: indec_ipc
+  primary_keys:
+    - obs_time
+    - internal_series_code
+  timezone: America/Argentina/Buenos_Aires
+parse_config:
+  header_search_max_rows: 30
+  series_map:
+    - internal_series_code_prefix: INDEC_IPC_INDICES
+      unit: index_base_100_dec2016
+      frequency: M
+      sheet: Índices IPC Cobertura Nacional
+      header_row: 5
+      start_data_row: 9
+      category_col: A
+      only_configured_categories: true
+      skip_headers:
+        - Nivel general y divisiones COICOP
+        - Categorías
+        - Bienes y servicios
+      category_mapping:
+        "Nivel general": NIVEL_GENERAL
+        "Alimentos y bebidas no alcohólicas": ALIMENTOS_BEBIDAS
+        "Bebidas alcohólicas y tabaco": BEBIDAS_ALCOHOLICAS_TABACO
+        "Prendas de vestir y calzado": VESTIMENTA
+        "Vivienda, agua, electricidad, gas y otros combustibles": VIVIENDA
+        "Equipamiento y mantenimiento del hogar": EQUIPAMIENTO_HOGAR
+        "Salud": SALUD
+        "Transporte": TRANSPORTE
+        "Comunicación": COMUNICACION
+        "Recreación y cultura": RECREACION_CULTURA
+        "Educación": EDUCACION
+        "Restaurantes y hoteles": RESTAURANTES_HOTELES
+        "Bienes y servicios varios": BIENES_SERVICIOS
+      drop_na: true
+    - internal_series_code_prefix: INDEC_IPC_VARMEN
+      unit: pct
+      frequency: M
+      sheet: Variación mensual IPC Nacional
+      header_row: 5
+      start_data_row: 9
+      category_col: A
+      only_configured_categories: true
+      skip_headers:
+        - Nivel general y divisiones COICOP
+        - Categorías
+        - Bienes y servicios
+      category_mapping:
+        "Nivel general": NIVEL_GENERAL
+        "Alimentos y bebidas no alcohólicas": ALIMENTOS_BEBIDAS
+      drop_na: true
+    - internal_series_code_prefix: INDEC_IPC_VARINT
+      unit: pct
+      frequency: M
+      sheet: Var. interanual IPC Nacional
+      header_row: 5
+      start_data_row: 9
+      category_col: A
+      only_configured_categories: true
+      skip_headers:
+        - Nivel general y divisiones COICOP
+        - Categorías
+        - Bienes y servicios
+      category_mapping:
+        "Nivel general": NIVEL_GENERAL
+      drop_na: true
+

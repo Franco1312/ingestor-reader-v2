@@ -1,0 +1,93 @@
+dataset_id: bcra_infomondia
+provider: BCRA
+frequency: D
+lag_days: 7
+source:
+  kind: http
+  url: https://www.bcra.gob.ar/Pdfs/PublicacionesEstadisticas/infomondia.xls
+  format: xlsx
+parse:
+  plugin: bcra_infomondia
+normalize:
+  plugin: bcra_infomondia
+  primary_keys:
+    - obs_time
+    - internal_series_code
+  timezone: America/Argentina/Buenos_Aires
+parse_config:
+  file_type: infomondia
+  header_search_max_rows: 30
+  series_map:
+    - internal_series_code: BCRA_TC_OFICIAL_A3500_PESOSxUSD_D
+      unit: ARS_per_USD
+      frequency: D
+      sheet: DATOS | DATA
+      header_row: 6
+      date_col: M
+      value_col: O
+      drop_na: true
+    - internal_series_code: BCRA_RESERVAS_USD_M_D
+      unit: USD_millions
+      frequency: D
+      sheet: DATOS | DATA
+      header_row: 6
+      date_col: M
+      value_col: N
+      drop_na: true
+    - internal_series_code: BCRA_BASE_MONETARIA_TOTAL_ARS_BN_D
+      unit: ARS_billions
+      frequency: D
+      sheet: DATOS | DATA
+      header_row: 6
+      date_col: Q
+      value_col: R
+      drop_na: true
+    - internal_series_code: BCRA_M2_PRIVADO_ARS_BN_D
+      unit: ARS_billions
+      frequency: D
+      sheet: DATOS | DATA
+      header_row: 6
+      date_col: Q
+      value_col: S
+      drop_na: true
+    - internal_series_code: BCRA_TASA_BAIBAR_TNA_D
+      unit: pct_TNA
+      frequency: D
+      sheet: DATOS | DATA
+      header_row: 6
+      date_col: I
+      value_col: J
+      drop_na: true
+    - internal_series_code: BCRA_BADLAR_PRIVADOS_TNA_D
+      unit: pct_TNA
+      frequency: D
+      sheet: DATOS | DATA
+      header_row: 6
+      date_col: X
+      value_col: Y
+      drop_na: true
+    - internal_series_code: BCRA_TM20_PRIVADOS_TNA_D
+      unit: pct_TNA
+      frequency: D
+      sheet: DATOS | DATA
+      header_row: 6
+      date_col: X
+      value_col: AA
+      drop_na: true
+    - internal_series_code: BCRA_DEP_PESOS_PRIVADOS_TOTAL_ARS_BN_D
+      unit: ARS_billions
+      frequency: D
+      sheet: DATOS | DATA
+      header_row: 6
+      date_col: AH
+      value_col: AJ
+      drop_na: true
+    - internal_series_code: BCRA_PRESTAMOS_PESOS_PRIVADOS_TOTAL_ARS_BN_D
+      unit: ARS_billions
+      frequency: D
+      sheet: DATOS | DATA
+      header_row: 6
+      date_col: AM
+      value_col: AN
+      drop_na: true
+
