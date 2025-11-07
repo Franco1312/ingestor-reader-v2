@@ -15,7 +15,6 @@ El punto de entrada único es: `ingestor_reader.app.lambda_handler.handler`
 
 ### Variables de Entorno Opcionales
 
-- `DYNAMODB_TABLE`: Tabla DynamoDB para locks (opcional)
 - `SNS_TOPIC_ARN`: ARN del topic SNS para notificaciones (opcional)
 - `VERIFY_SSL`: Verificar certificados SSL (true/false, por defecto: true)
 - `ENV`: Entorno (local, staging, production) - solo si no se usa S3_BUCKET
@@ -38,20 +37,6 @@ El punto de entrada único es: `ingestor_reader.app.lambda_handler.handler`
         "arn:aws:s3:::your-bucket-name/*",
         "arn:aws:s3:::your-bucket-name"
       ]
-    },
-    {
-      "Effect": "Allow",
-      "Action": [
-        "dynamodb:GetItem",
-        "dynamodb:PutItem",
-        "dynamodb:DeleteItem"
-      ],
-      "Resource": "arn:aws:dynamodb:*:*:table/your-lock-table",
-      "Condition": {
-        "StringEquals": {
-          "dynamodb:TableName": "your-lock-table"
-        }
-      }
     },
     {
       "Effect": "Allow",
@@ -186,7 +171,6 @@ aws lambda create-function \
   --environment Variables="{
     S3_BUCKET=your-bucket-name,
     AWS_REGION=us-east-1,
-    DYNAMODB_TABLE=etl-locks,
     SNS_TOPIC_ARN=arn:aws:sns:us-east-1:ACCOUNT:datasets-updated
   }"
 ```

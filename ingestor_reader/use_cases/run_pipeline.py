@@ -9,7 +9,6 @@ from ingestor_reader.domain.entities.run import Run
 from ingestor_reader.domain.services.pipeline_service import generate_run_id, generate_version_ts
 from ingestor_reader.infra.s3_storage import S3Storage
 from ingestor_reader.infra.s3_catalog import S3Catalog
-from ingestor_reader.infra.locks.dynamodb_lock import DynamoDBLock
 from ingestor_reader.infra.event_bus.sns_publisher import SNSPublisher
 from ingestor_reader.use_cases.steps.fetch_resource import fetch_resource, compute_file_hash
 from ingestor_reader.use_cases.steps.check_source_changed import check_source_changed
@@ -34,21 +33,12 @@ if not logging.getLogger().handlers:
     )
 
 
-def _initialize_infrastructure(app_config: AppConfig) -> tuple[S3Catalog, DynamoDBLock | None, SNSPublisher]:
+def _initialize_infrastructure(app_config: AppConfig) -> tuple[S3Catalog, SNSPublisher]:
     """Initialize infrastructure adapters."""
     s3_storage = S3Storage(bucket=app_config.s3_bucket, region=app_config.aws_region)
     catalog = S3Catalog(s3_storage)
-    lock = DynamoDBLock(app_config.dynamodb_table, region=app_config.aws_region) if app_config.dynamodb_table else None
     publisher = SNSPublisher(region=app_config.aws_region)
-    return catalog, lock, publisher
-
-
-def _acquire_lock(lock: DynamoDBLock | None, dataset_id: str, run_id: str) -> None:
-    """Acquire lock for dataset."""
-    if lock:
-        if not lock.acquire(dataset_id, run_id):
-            logger.warning("Failed to acquire lock for %s", dataset_id)
-            raise RuntimeError("Could not acquire lock")
+    return catalog, publisher
 
 
 def run_pipeline(
@@ -78,65 +68,53 @@ def run_pipeline(
     logger.info("Starting pipeline: %s run=%s", config.dataset_id, run_id)
     
     # Initialize infrastructure
-    catalog, lock, publisher = _initialize_infrastructure(app_config)
+    catalog, publisher = _initialize_infrastructure(app_config)
     
-    try:
-        # Acquire lock to prevent concurrent runs
-        _acquire_lock(lock, config.dataset_id, run_id)
-        
-        # Step 1: Fetch resource
-        content, raw_key, file_hash, file_size = step_fetch_resource(
-            catalog, config, app_config, run_id
-        )
-        
-        # Step 2: Check source changed
-        if not step_check_source_changed(catalog, config.dataset_id, content, full_reload):
-            logger.info("Pipeline completed: no changes detected")
-            return run
-        
-        # Step 3: Parse file
-        parsed_df = step_parse_file(content, config)
-        
-        # Step 4: Filter new data
-        new_df = step_filter_new_data(catalog, config.dataset_id, parsed_df)
-        if len(new_df) == 0:
-            logger.info("Pipeline completed: no new data")
-            return run
-        
-        # Step 5: Normalize rows
-        normalized_df = step_normalize_rows(new_df, config)
-        
-        # Step 6: Compute delta
-        delta_df, current_index_df = step_compute_delta(catalog, config, normalized_df)
-        
-        # Step 7: Enrich metadata
-        enriched_delta_df = step_enrich_metadata(delta_df, config, version_ts)
-        
-        # Step 8: Write outputs
-        output_keys, rows_added = step_write_outputs(
-            catalog, config, run_id, version_ts, normalized_df, enriched_delta_df, delta_df
-        )
-        
-        # Step 9: Publish version
-        source_file = (raw_key, file_hash, file_size)
-        published = step_publish_version(
-            catalog, config, version_ts, source_file, output_keys, rows_added,
-            current_index_df, delta_df
-        )
-        
-        # Step 10: Notify consumers
-        if published:
-            step_notify_consumers(catalog, publisher, config, app_config, version_ts)
-        
-        logger.info("Pipeline completed: %d normalized, %d added", len(normalized_df), rows_added)
-        
-    finally:
-        # Always release lock
-        if lock:
-            try:
-                lock.release(config.dataset_id, run_id)
-            except (RuntimeError, ValueError, KeyError) as e:
-                logger.warning("Failed to release lock: %s", e)
+    # Step 1: Fetch resource
+    content, raw_key, file_hash, file_size = step_fetch_resource(
+        catalog, config, app_config, run_id
+    )
+    
+    # Step 2: Check source changed
+    if not step_check_source_changed(catalog, config.dataset_id, content, full_reload):
+        logger.info("Pipeline completed: no changes detected")
+        return run
+    
+    # Step 3: Parse file
+    parsed_df = step_parse_file(content, config)
+    
+    # Step 4: Filter new data
+    new_df = step_filter_new_data(catalog, config.dataset_id, parsed_df)
+    if len(new_df) == 0:
+        logger.info("Pipeline completed: no new data")
+        return run
+    
+    # Step 5: Normalize rows
+    normalized_df = step_normalize_rows(new_df, config)
+    
+    # Step 6: Compute delta
+    delta_df, current_index_df = step_compute_delta(catalog, config, normalized_df)
+    
+    # Step 7: Enrich metadata
+    enriched_delta_df = step_enrich_metadata(delta_df, config, version_ts)
+    
+    # Step 8: Write outputs
+    output_keys, rows_added = step_write_outputs(
+        catalog, config, run_id, version_ts, normalized_df, enriched_delta_df, delta_df
+    )
+    
+    # Step 9: Publish version
+    source_file = (raw_key, file_hash, file_size)
+    published = step_publish_version(
+        catalog, config, version_ts, source_file, output_keys, rows_added,
+        current_index_df, delta_df
+    )
+    
+    # Step 10: Notify consumers
+    if published:
+        step_notify_consumers(catalog, publisher, config, app_config, version_ts)
+    
+    logger.info("Pipeline completed: %d normalized, %d added", len(normalized_df), rows_added)
     
     return run
 

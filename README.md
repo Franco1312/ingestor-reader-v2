@@ -9,7 +9,6 @@ A clean, production-ready ETL service that:
 - Normalizes and validates data according to YAML configs
 - Computes incremental deltas using anti-join
 - Publishes versions atomically with CAS (Compare-And-Swap)
-- Ensures concurrency safety with DynamoDB locks
 
 ## Architecture
 
@@ -26,7 +25,6 @@ ingestor_reader/
     s3_catalog.py
     parquet_io.py
     readers/        # CSV, Excel readers
-    locks/          # DynamoDB lock
     event_bus/      # SNS publisher
     configs/        # Config loader
 ```
@@ -77,7 +75,6 @@ notify:
 
 ```bash
 export S3_BUCKET=my-etl-bucket
-export DYNAMODB_TABLE=etl-locks  # Optional
 export AWS_ACCESS_KEY_ID=...
 export AWS_SECRET_ACCESS_KEY=...
 export AWS_DEFAULT_REGION=us-east-1
@@ -93,11 +90,6 @@ python -m ingestor_reader.app.main run-pipeline --dataset BCRA_TC_OFICIAL
 python -m ingestor_reader.app.main run-pipeline \
   --dataset BCRA_TC_OFICIAL \
   --config configs/custom.yml
-
-# Disable lock (for testing)
-python -m ingestor_reader.app.main run-pipeline \
-  --dataset BCRA_TC_OFICIAL \
-  --no-lock
 ```
 
 ## S3 Layout
@@ -144,11 +136,6 @@ This ensures that:
 
 ## Concurrency Safety
 
-- **DynamoDB Lock**: Per-dataset lock with TTL
-  - Acquired before publish step
-  - Released in finally block
-  - Uses conditional write: `attribute_not_exists OR expires_at < now`
-  
 - **S3 CAS**: Pointer update with `If-Match` header
   - Prevents concurrent pointer updates
   - One run succeeds, others fail gracefully
@@ -188,7 +175,7 @@ pytest tests/
 - **Clean Architecture**: Domain logic separate from I/O
 - **Atomic Operations**: CAS for pointer updates
 - **Incremental**: Append-only with anti-join
-- **Concurrency Safe**: Lock + CAS
+- **Concurrency Safe**: CAS for pointer updates
 - **Short Functions**: < 60 lines, clear names
 - **Typed**: Type hints everywhere
 

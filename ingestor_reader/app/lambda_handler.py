@@ -34,7 +34,6 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     Environment variables required:
     - S3_BUCKET: S3 bucket name
     - AWS_REGION: AWS region (optional, defaults to us-east-1)
-    - DYNAMODB_TABLE: DynamoDB table for locks (optional)
     - SNS_TOPIC_ARN: SNS topic ARN for notifications (optional)
     - ENV: Environment name (local, staging, production) - optional, defaults to local
     

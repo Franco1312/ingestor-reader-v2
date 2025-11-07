@@ -65,7 +65,6 @@ aws lambda create-function \
     S3_BUCKET=your-bucket-name,
     AWS_REGION=us-east-1,
     ENV=production,
-    DYNAMODB_TABLE=etl-locks,
     SNS_TOPIC_ARN=arn:aws:sns:us-east-1:<account-id>:datasets-updated
   }"
 ```
@@ -109,7 +108,7 @@ Configura handler: ingestor_reader.app.lambda_handler.handler
 - `venv/`, `env/`: Entornos virtuales
 - `tests/`, `docs/`, `scripts/`: No necesarios en runtime
 - `.git/`, `.env`: Archivos de desarrollo
-- `*.csv`, `*.lock`: Archivos temporales
+- `*.csv`: Archivos temporales
 
 ## Verificación
 
