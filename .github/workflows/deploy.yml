@@ -1,5 +1,7 @@
 name: Deploy to Lambda
 
+# Pipeline to build Docker image and deploy to Lambda
+
 on:
   push:
     branches:
