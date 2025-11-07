@@ -49,9 +49,21 @@ class DynamoDBLock:
                 ConditionExpression="attribute_not_exists(dataset_id) OR expires_at < :now",
                 ExpressionAttributeValues={":now": int(now.timestamp())},
             )
+            logger.info("Lock acquired for %s (run_id=%s, expires_at=%d)", dataset_id, run_id, expires_at)
             return True
         except ClientError as e:
             if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+                try:
+                    response = self.table.get_item(Key={"dataset_id": dataset_id})
+                    if "Item" in response:
+                        existing_run_id = response["Item"].get("run_id", "unknown")
+                        existing_expires = response["Item"].get("expires_at", 0)
+                        logger.warning(
+                            "Lock already exists for %s (run_id=%s, expires_at=%d, current_time=%d)",
+                            dataset_id, existing_run_id, existing_expires, int(now.timestamp())
+                        )
+                except Exception:
+                    pass
                 return False
             raise
     
