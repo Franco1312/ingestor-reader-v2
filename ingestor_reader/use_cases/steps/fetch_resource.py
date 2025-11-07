@@ -17,7 +17,10 @@ def fetch_resource(url: str, verify_ssl: bool = True) -> bytes:
     Returns:
         Content bytes
     """
-    logger.info(f"Fetching from HTTP: {url}")
+    logger.info("Fetching from HTTP: %s (verify_ssl=%s)", url, verify_ssl)
+    if not verify_ssl:
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
     response = requests.get(url, timeout=300, verify=verify_ssl)
     response.raise_for_status()
     return response.content
