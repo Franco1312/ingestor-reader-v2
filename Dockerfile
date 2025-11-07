@@ -5,6 +5,10 @@ COPY ingestor_reader/ ${LAMBDA_TASK_ROOT}/ingestor_reader/
 COPY config/ ${LAMBDA_TASK_ROOT}/config/
 COPY pyproject.toml ${LAMBDA_TASK_ROOT}/
 
+# Copy certificates if they exist (optional)
+RUN mkdir -p ${LAMBDA_TASK_ROOT}/certs/
+COPY certs/ ${LAMBDA_TASK_ROOT}/certs/
+
 # Install dependencies
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -e .

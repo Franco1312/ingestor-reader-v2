@@ -64,6 +64,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         
         # Load configurations from environment
         app_config = load_app_config()
+        logger.info("Configuration loaded: verify_ssl=%s, s3_bucket=%s", app_config.verify_ssl, app_config.s3_bucket)
         dataset_config = load_config(dataset_id)
         
         # Run pipeline
