@@ -130,14 +130,20 @@ class S3Catalog:
         """
         Get manifest pointer path for a version.
         
+        Returns the relative path within the bucket (without the "datasets/" prefix)
+        for use in SNS notifications. The consumer will construct the full S3 key
+        by combining the bucket name with this relative path.
+        
         Args:
             dataset_id: Dataset ID
             version_ts: Version timestamp
             
         Returns:
-            Manifest pointer path (S3 key)
+            Manifest pointer path (relative path within bucket, without "datasets/" prefix)
         """
-        return self._version_manifest_key(dataset_id, version_ts)
+        # Return path without "datasets/" prefix for SNS consumers
+        # The full S3 key includes "datasets/" but the pointer should be relative to bucket root
+        return f"{dataset_id}/versions/{version_ts}/manifest.json"
     
     def read_index(self, dataset_id: str) -> Optional[pd.DataFrame]:
         """Read index DataFrame."""
