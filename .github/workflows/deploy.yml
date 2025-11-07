@@ -1,6 +1,7 @@
 name: Deploy to Lambda
 
 # Pipeline to build Docker image and deploy to Lambda
+# Re-testing with ECR permissions
 
 on:
   push:
