@@ -24,6 +24,14 @@ from ingestor_reader.use_cases.steps.notify_consumers import notify_consumers
 
 logger = logging.getLogger(__name__)
 
+# Configure logging format for CloudWatch (simple format)
+# Only configure if no handlers exist (allows override in main.py for local dev)
+if not logging.getLogger().handlers:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(levelname)s - %(message)s",
+    )
+
 
 def _initialize_infrastructure(app_config: AppConfig) -> tuple[S3Catalog, DynamoDBLock | None, SNSPublisher]:
     """Initialize infrastructure adapters."""

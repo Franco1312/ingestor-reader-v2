@@ -1,0 +1,66 @@
+name: Deploy to Lambda
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set environment variables
+        run: |
+          echo "AWS_REGION=${AWS_REGION:-us-east-1}" >> $GITHUB_ENV
+          echo "ECR_REPOSITORY=${ECR_REPOSITORY:-ingestor-reader}" >> $GITHUB_ENV
+          echo "LAMBDA_FUNCTION_NAME=${LAMBDA_FUNCTION_NAME:-ingestor-reader}" >> $GITHUB_ENV
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
+          LAMBDA_FUNCTION_NAME: ${{ secrets.LAMBDA_FUNCTION_NAME }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Get commit SHA
+        id: commit
+        run: echo "sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Build Docker image
+        run: |
+          docker build -t ${{ env.ECR_REPOSITORY }}:${{ steps.commit.outputs.sha }} \
+                       -t ${{ env.ECR_REPOSITORY }}:latest .
+
+      - name: Tag Docker image
+        run: |
+          docker tag ${{ env.ECR_REPOSITORY }}:${{ steps.commit.outputs.sha }} \
+                     ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.commit.outputs.sha }}
+          docker tag ${{ env.ECR_REPOSITORY }}:latest \
+                     ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
+
+      - name: Push Docker image to ECR
+        run: |
+          docker push ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.commit.outputs.sha }}
+          docker push ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
+
+      - name: Update Lambda function
+        run: |
+          aws lambda update-function-code \
+            --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+            --image-uri ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.commit.outputs.sha }} \
+            --region ${{ env.AWS_REGION }}
+

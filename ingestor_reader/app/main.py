@@ -1,8 +1,8 @@
-"""CLI entry point."""
+"""CLI entry point for local development."""
 import logging
 import typer
 
-# Load environment variables from .env file first
+# Load environment variables from .env file first (only in local)
 from ingestor_reader.infra.configs.env_loader import load_env_file
 load_env_file()
 
@@ -20,8 +20,8 @@ def run(
     dataset_id: str = typer.Argument(..., help="Dataset ID"),
     full_reload: bool = typer.Option(False, "--full-reload", help="Force full reload even if source unchanged"),
 ):
-    """Run ETL pipeline for a dataset."""
-    # Setup logging
+    """Run ETL pipeline for a dataset (local development)."""
+    # Setup logging for local development
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
