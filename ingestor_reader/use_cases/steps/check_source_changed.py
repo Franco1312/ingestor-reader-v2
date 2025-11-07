@@ -1,5 +1,4 @@
 """Check if source file changed step."""
-import json
 import logging
 from typing import Optional
 
@@ -43,10 +42,12 @@ def check_source_changed(
         return True, None
     
     # Read last version manifest
-    manifest_key = f"datasets/{dataset_id}/versions/{last_version}/manifest.json"
+    manifest = catalog.read_version_manifest(dataset_id, last_version)
+    if manifest is None:
+        logger.info("Last version manifest not found")
+        return True, None
+    
     try:
-        manifest_body = catalog.s3.get_object(manifest_key)
-        manifest = json.loads(manifest_body.decode())
         
         # Get last processed file hash
         source_files = manifest.get("source", {}).get("files", [])
@@ -68,7 +69,7 @@ def check_source_changed(
         
         return has_changed, last_hash
         
-    except (KeyError, ValueError, json.JSONDecodeError) as e:
-        logger.warning("Could not read last manifest: %s. Processing anyway.", e)
+    except (KeyError, ValueError) as e:
+        logger.warning("Could not parse last manifest: %s. Processing anyway.", e)
         return True, None
 

@@ -103,6 +103,42 @@ class S3Catalog:
         body = manifest.model_dump_json(indent=2)
         self.s3.put_object(key, body.encode(), content_type="application/json")
     
+    def read_version_manifest(self, dataset_id: str, version_ts: str) -> Optional[dict]:
+        """
+        Read version manifest.
+        
+        Args:
+            dataset_id: Dataset ID
+            version_ts: Version timestamp
+            
+        Returns:
+            Manifest dict or None if not found
+        """
+        key = self._version_manifest_key(dataset_id, version_ts)
+        try:
+            body = self.s3.get_object(key)
+            return json.loads(body.decode())
+        except ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code", "")
+            if error_code in ("404", "NoSuchKey"):
+                return None
+            raise
+        except json.JSONDecodeError:
+            return None
+    
+    def get_version_manifest_pointer(self, dataset_id: str, version_ts: str) -> str:
+        """
+        Get manifest pointer path for a version.
+        
+        Args:
+            dataset_id: Dataset ID
+            version_ts: Version timestamp
+            
+        Returns:
+            Manifest pointer path (S3 key)
+        """
+        return self._version_manifest_key(dataset_id, version_ts)
+    
     def read_index(self, dataset_id: str) -> Optional[pd.DataFrame]:
         """Read index DataFrame."""
         key = self._index_key(dataset_id)

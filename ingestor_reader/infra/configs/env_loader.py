@@ -5,12 +5,23 @@ from dotenv import load_dotenv
 
 
 def load_env_file() -> None:
-    """Load environment variables from .env file if it exists."""
+    """
+    Load environment variables from .env file if it exists.
+    
+    In AWS deployments, environment variables should be set directly
+    (via Lambda environment, ECS task definition, etc.) and .env files are not used.
+    This function is primarily for local development.
+    """
+    # Skip .env loading in production environments (AWS Lambda, ECS, etc.)
+    # These environments should use environment variables directly
+    if os.getenv("AWS_LAMBDA_FUNCTION_NAME") or os.getenv("ECS_CONTAINER_METADATA_URI"):
+        return
+    
+    # Try loading from project root
     env_path = Path(__file__).parent.parent.parent.parent / ".env"
     if env_path.exists():
-        # override=True ensures .env values take precedence over existing env vars
         load_dotenv(env_path, override=True)
     else:
-        # Try loading from current directory
+        # Try loading from current working directory
         load_dotenv(override=True)
 

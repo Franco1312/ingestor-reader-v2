@@ -47,13 +47,7 @@ def _get_last_version_manifest(catalog: S3Catalog, dataset_id: str) -> Optional[
     if not last_version:
         return None
     
-    manifest_key = f"datasets/{dataset_id}/versions/{last_version}/manifest.json"
-    try:
-        manifest_body = catalog.s3.get_object(manifest_key)
-        return json.loads(manifest_body.decode())
-    except (KeyError, ValueError, json.JSONDecodeError) as e:
-        logger.warning("Could not read last manifest: %s", e)
-        return None
+    return catalog.read_version_manifest(dataset_id, last_version)
 
 
 def _get_latest_date_from_outputs(catalog: S3Catalog, dataset_id: str) -> Optional[pd.Timestamp]:

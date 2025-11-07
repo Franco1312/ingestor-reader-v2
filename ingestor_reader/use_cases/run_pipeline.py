@@ -117,7 +117,7 @@ def run_pipeline(
         
         # Step 10: Notify consumers
         if published:
-            step_notify_consumers(publisher, config, app_config, version_ts, rows_added)
+            step_notify_consumers(catalog, publisher, config, app_config, version_ts)
         
         logger.info("Pipeline completed: %d normalized, %d added", len(normalized_df), rows_added)
         
@@ -292,15 +292,16 @@ def step_publish_version(
 
 
 def step_notify_consumers(
+    catalog: S3Catalog,
     publisher: SNSPublisher,
     config: DatasetConfig,
     app_config: AppConfig,
     version_ts: str,
-    rows_added: int,
 ) -> None:
     """Step: Notify consumers of new version."""
     topic_arn = (config.notify.sns_topic_arn if config.notify else None) or app_config.sns_topic_arn
-    notify_consumers(publisher, topic_arn, config.dataset_id, version_ts, rows_added)
+    manifest_pointer = catalog.get_version_manifest_pointer(config.dataset_id, version_ts)
+    notify_consumers(publisher, topic_arn, config.dataset_id, manifest_pointer)
     logger.info("Notified consumers")
 
 

@@ -16,24 +16,39 @@ class SNSPublisher:
         """
         self.sns_client = boto3.client("sns", region_name=region)
     
-    def publish_dataset_version_published(
-        self, topic_arn: str, event_dict: dict[str, Any]  # type: ignore
+    def publish(
+        self,
+        topic_arn: str,
+        message: dict[str, Any],  # type: ignore
+        subject: str,
+        message_group_id: Optional[str] = None,
+        message_deduplication_id: Optional[str] = None,
     ) -> str:
         """
-        Publish dataset version published event.
+        Publish message to SNS topic.
         
         Args:
             topic_arn: SNS topic ARN
-            event_dict: Event payload
+            message: Message payload (dict)
+            subject: Message subject
+            message_group_id: Message group ID for FIFO topics (optional)
+            message_deduplication_id: Message deduplication ID for FIFO topics (optional)
             
         Returns:
             Message ID
         """
-        message = json.dumps(event_dict)
-        response = self.sns_client.publish(
-            TopicArn=topic_arn,
-            Message=message,
-            Subject="DatasetVersionPublished",
-        )
+        message_json = json.dumps(message)
+        publish_params = {
+            "TopicArn": topic_arn,
+            "Message": message_json,
+            "Subject": subject,
+        }
+        
+        if message_group_id is not None:
+            publish_params["MessageGroupId"] = message_group_id
+        if message_deduplication_id is not None:
+            publish_params["MessageDeduplicationId"] = message_deduplication_id
+        
+        response = self.sns_client.publish(**publish_params)
         return response["MessageId"]
 
