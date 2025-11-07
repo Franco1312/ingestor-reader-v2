@@ -29,7 +29,8 @@ logger = logging.getLogger(__name__)
 if not logging.getLogger().handlers:
     logging.basicConfig(
         level=logging.INFO,
-        format="%(levelname)s - %(message)s",
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
     )
 
 
