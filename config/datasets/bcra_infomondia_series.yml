@@ -22,7 +22,7 @@ parse_config:
       unit: ARS_per_USD
       frequency: D
       sheet: RESERVAS
-      header_row: 4
+      header_row: 8
       date_col: A
       value_col: P
       drop_na: true
@@ -30,7 +30,7 @@ parse_config:
       unit: USD_millions
       frequency: D
       sheet: RESERVAS
-      header_row: 4
+      header_row: 8
       date_col: A
       value_col: C
       drop_na: true
@@ -38,7 +38,7 @@ parse_config:
       unit: ARS_billions
       frequency: D
       sheet: BASE MONETARIA
-      header_row: 4
+      header_row: 8
       date_col: A
       value_col: AD
       drop_na: true
@@ -46,7 +46,7 @@ parse_config:
       unit: ARS_billions
       frequency: D
       sheet: DEPOSITOS
-      header_row: 4
+      header_row: 8
       date_col: A
       value_col: X
       drop_na: true
@@ -54,7 +54,7 @@ parse_config:
       unit: pct_TNA
       frequency: D
       sheet: TASAS DE MERCADO
-      header_row: 4
+      header_row: 8
       date_col: A
       value_col: T
       drop_na: true
@@ -62,7 +62,7 @@ parse_config:
       unit: pct_TNA
       frequency: D
       sheet: TASAS DE MERCADO
-      header_row: 4
+      header_row: 8
       date_col: A
       value_col: M
       drop_na: true
@@ -70,7 +70,7 @@ parse_config:
       unit: pct_TNA
       frequency: D
       sheet: TASAS DE MERCADO
-      header_row: 4
+      header_row: 8
       date_col: A
       value_col: P
       drop_na: true
@@ -78,7 +78,7 @@ parse_config:
       unit: ARS_billions
       frequency: D
       sheet: DEPOSITOS
-      header_row: 4
+      header_row: 8
       date_col: A
       value_col: S
       drop_na: true
@@ -86,7 +86,7 @@ parse_config:
       unit: ARS_billions
       frequency: D
       sheet: PRESTAMOS
-      header_row: 4
+      header_row: 8
       date_col: A
       value_col: U
       drop_na: true
@@ -94,7 +94,7 @@ parse_config:
       unit: ARS_billions
       frequency: D
       sheet: BASE MONETARIA
-      header_row: 4
+      header_row: 8
       date_col: A
       value_col: Z
       drop_na: true
@@ -102,7 +102,7 @@ parse_config:
       unit: ARS_billions
       frequency: D
       sheet: INSTRUMENTOS DEL BCRA
-      header_row: 4
+      header_row: 8
       date_col: A
       value_col: B
       drop_na: true
@@ -110,7 +110,7 @@ parse_config:
       unit: ARS_billions
       frequency: D
       sheet: INSTRUMENTOS DEL BCRA
-      header_row: 4
+      header_row: 8
       date_col: A
       value_col: F
       drop_na: true
@@ -118,7 +118,7 @@ parse_config:
       unit: pct_TNA
       frequency: D
       sheet: INSTRUMENTOS DEL BCRA
-      header_row: 4
+      header_row: 8
       date_col: A
       value_col: M
       drop_na: true
@@ -126,7 +126,7 @@ parse_config:
       unit: pct_TNA
       frequency: D
       sheet: TASAS DE MERCADO
-      header_row: 4
+      header_row: 8
       date_col: A
       value_col: L
       drop_na: true
@@ -134,7 +134,7 @@ parse_config:
       unit: pct_TNA
       frequency: D
       sheet: TASAS DE MERCADO
-      header_row: 4
+      header_row: 8
       date_col: A
       value_col: O
       drop_na: true
@@ -142,7 +142,7 @@ parse_config:
       unit: pct_TNA
       frequency: D
       sheet: TASAS DE MERCADO
-      header_row: 4
+      header_row: 8
       date_col: A
       value_col: R
       drop_na: true
@@ -150,7 +150,7 @@ parse_config:
       unit: ARS_billions
       frequency: D
       sheet: DEPOSITOS
-      header_row: 4
+      header_row: 8
       date_col: A
       value_col: Q
       drop_na: true
