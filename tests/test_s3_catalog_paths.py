@@ -6,7 +6,7 @@ import pandas as pd
 
 from ingestor_reader.infra.s3_storage import S3Storage
 from ingestor_reader.infra.s3_catalog import S3Catalog
-from ingestor_reader.domain.entities.manifest import Manifest, OutputsInfo, IndexInfo, QualityInfo
+from ingestor_reader.domain.entities.manifest import Manifest, OutputsInfo, IndexInfo
 
 
 def test_s3_catalog_paths():
@@ -23,10 +23,9 @@ def test_s3_catalog_paths():
     assert "datasets" in catalog._config_key(dataset_id)
     assert dataset_id in catalog._config_key(dataset_id)
     assert "index" in catalog._index_key(dataset_id)
-    assert "versions" in catalog._version_manifest_key(dataset_id, version_ts)
+    assert "events" in catalog._event_manifest_key(dataset_id, version_ts)
     assert "current" in catalog._current_manifest_key(dataset_id)
-    assert "runs" in catalog._run_raw_prefix(dataset_id, run_id)
-    assert "outputs" in catalog._outputs_prefix(dataset_id, version_ts)
+    assert "events" in catalog._events_prefix(dataset_id, version_ts)
 
 
 def test_get_current_manifest_etag():
@@ -85,8 +84,8 @@ def test_put_current_manifest_pointer_cas():
         catalog.put_current_manifest_pointer("TEST", body, "old-etag")
 
 
-def test_write_manifest():
-    """Test writing manifest."""
+def test_write_event_manifest():
+    """Test writing event manifest."""
     s3_storage = Mock(spec=S3Storage)
     s3_storage.put_object = Mock(return_value="etag")
     catalog = S3Catalog(s3_storage)
@@ -107,13 +106,12 @@ def test_write_manifest():
             key_columns=["key"],
             hash_column="key_hash",
         ),
-        quality=QualityInfo(lag_days=2),
     )
     
-    catalog.write_manifest("TEST", "v1", manifest)
+    catalog.write_event_manifest("TEST", "v1", manifest)
     s3_storage.put_object.assert_called_once()
     call_args = s3_storage.put_object.call_args
-    assert "versions" in call_args[0][0]  # key contains versions
+    assert "events" in call_args[0][0]  # key contains events
 
 
 def test_read_write_index():
@@ -145,8 +143,8 @@ def test_read_write_index():
     assert result is None
 
 
-def test_write_outputs():
-    """Test writing outputs."""
+def test_write_events():
+    """Test writing events."""
     s3_storage = Mock(spec=S3Storage)
     catalog = S3Catalog(s3_storage)
     
@@ -154,10 +152,10 @@ def test_write_outputs():
     catalog.parquet_io = Mock()
     catalog.parquet_io.write_to_bytes = Mock(return_value=b"parquet-data")
     
-    keys = catalog.write_outputs("TEST", "v1", df)
+    keys = catalog.write_events("TEST", "v1", df)
     
     assert len(keys) == 1
-    assert "outputs" in keys[0]
+    assert "events" in keys[0]
     assert "v1" in keys[0]
     s3_storage.put_object.assert_called_once()
 

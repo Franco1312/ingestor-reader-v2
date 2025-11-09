@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 class SourceFile(BaseModel):
     """Source file metadata."""
-    path: str
+    path: str | None = None
     sha256: str
     size: int
 

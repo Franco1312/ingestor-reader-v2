@@ -26,30 +26,30 @@ def check_source_changed(
         - has_changed: True if file changed or first run, False if unchanged
         - last_hash: Hash of last processed file (None if first run)
     """
-    # Compute hash of current source
+
     current_hash = compute_file_hash(source_content)
     
-    # Get last processed manifest
+
     current_manifest = catalog.read_current_manifest(dataset_id)
     if current_manifest is None:
         logger.info("First run: no previous manifest found")
         return True, None
     
-    # Get last version manifest
+
     last_version = current_manifest.get("current_version")
     if not last_version:
         logger.info("No previous version found")
         return True, None
     
-    # Read last version manifest
-    manifest = catalog.read_version_manifest(dataset_id, last_version)
+
+    manifest = catalog.read_event_manifest(dataset_id, last_version)
     if manifest is None:
         logger.info("Last version manifest not found")
         return True, None
     
     try:
         
-        # Get last processed file hash
+
         source_files = manifest.get("source", {}).get("files", [])
         if not source_files:
             logger.info("No source files in last manifest")
@@ -60,7 +60,7 @@ def check_source_changed(
             logger.info("No hash in last manifest")
             return True, None
         
-        # Compare hashes
+
         has_changed = current_hash != last_hash
         if has_changed:
             logger.info("Source changed: %s -> %s", last_hash[:8], current_hash[:8])

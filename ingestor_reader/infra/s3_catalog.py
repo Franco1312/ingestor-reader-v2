@@ -22,6 +22,20 @@ class S3Catalog:
         self.s3 = s3_storage
         self.parquet_io = ParquetIO()
     
+    @staticmethod
+    def _is_not_found_error(error: ClientError) -> bool:
+        """
+        Check if ClientError is a 404/NoSuchKey error.
+        
+        Args:
+            error: ClientError exception
+            
+        Returns:
+            True if error is 404/NoSuchKey, False otherwise
+        """
+        error_code = error.response.get("Error", {}).get("Code", "")
+        return error_code in ("404", "NoSuchKey")
+    
     def _config_key(self, dataset_id: str) -> str:
         """Get config key."""
         return f"datasets/{dataset_id}/configs/config.yaml"
@@ -30,29 +44,22 @@ class S3Catalog:
         """Get index key."""
         return f"datasets/{dataset_id}/index/keys.parquet"
     
-    def _version_manifest_key(self, dataset_id: str, version_ts: str) -> str:
-        """Get version manifest key."""
-        return f"datasets/{dataset_id}/versions/{version_ts}/manifest.json"
     
     def _current_manifest_key(self, dataset_id: str) -> str:
         """Get current manifest pointer key."""
         return f"datasets/{dataset_id}/current/manifest.json"
     
-    def _run_raw_prefix(self, dataset_id: str, run_id: str) -> str:
-        """Get run raw prefix."""
-        return f"datasets/{dataset_id}/runs/{run_id}/raw/"
+    def _events_prefix(self, dataset_id: str, version_ts: str) -> str:
+        """Get events prefix."""
+        return f"datasets/{dataset_id}/events/{version_ts}/data/"
     
-    def _run_staging_key(self, dataset_id: str, run_id: str) -> str:
-        """Get run staging normalized key."""
-        return f"datasets/{dataset_id}/runs/{run_id}/staging/normalized.parquet"
+    def _event_manifest_key(self, dataset_id: str, version_ts: str) -> str:
+        """Get event manifest key."""
+        return f"datasets/{dataset_id}/events/{version_ts}/manifest.json"
     
-    def _run_delta_key(self, dataset_id: str, run_id: str) -> str:
-        """Get run delta key."""
-        return f"datasets/{dataset_id}/runs/{run_id}/delta/added.parquet"
-    
-    def _outputs_prefix(self, dataset_id: str, version_ts: str) -> str:
-        """Get outputs prefix."""
-        return f"datasets/{dataset_id}/outputs/{version_ts}/data/"
+    def _projection_series_key(self, dataset_id: str, series_code: str, year: int, month: int) -> str:
+        """Get projection series key."""
+        return f"datasets/{dataset_id}/projections/windows/{series_code}/year={year}/month={month:02d}/data.parquet"
     
     def get_current_manifest_etag(self, dataset_id: str) -> Optional[str]:
         """Get ETag of current manifest."""
@@ -67,8 +74,7 @@ class S3Catalog:
             body = self.s3.get_object(key)
             return json.loads(body.decode())
         except ClientError as e:
-            error_code = e.response.get("Error", {}).get("Code", "")
-            if error_code in ("404", "NoSuchKey"):
+            if self._is_not_found_error(e):
                 return None
             raise
         except json.JSONDecodeError:
@@ -93,19 +99,26 @@ class S3Catalog:
         """
         key = self._current_manifest_key(dataset_id)
         body_bytes = json.dumps(body, indent=2).encode()
-        return self.s3.put_object(
-            key, body_bytes, content_type="application/json", if_match=if_match_etag
-        )
+        try:
+            return self.s3.put_object(
+                key, body_bytes, content_type="application/json", if_match=if_match_etag
+            )
+        except ClientError as e:
+
+            error_code = e.response.get("Error", {}).get("Code", "")
+            if error_code == "412":
+                raise ValueError("Conditional PUT failed: ETag mismatch") from e
+            raise
     
-    def write_manifest(self, dataset_id: str, version_ts: str, manifest: Manifest) -> None:
-        """Write version manifest."""
-        key = self._version_manifest_key(dataset_id, version_ts)
+    def write_event_manifest(self, dataset_id: str, version_ts: str, manifest: Manifest) -> None:
+        """Write event manifest."""
+        key = self._event_manifest_key(dataset_id, version_ts)
         body = manifest.model_dump_json(indent=2)
         self.s3.put_object(key, body.encode(), content_type="application/json")
     
-    def read_version_manifest(self, dataset_id: str, version_ts: str) -> Optional[dict]:
+    def read_event_manifest(self, dataset_id: str, version_ts: str) -> Optional[dict]:
         """
-        Read version manifest.
+        Read event manifest.
         
         Args:
             dataset_id: Dataset ID
@@ -114,25 +127,23 @@ class S3Catalog:
         Returns:
             Manifest dict or None if not found
         """
-        key = self._version_manifest_key(dataset_id, version_ts)
+        key = self._event_manifest_key(dataset_id, version_ts)
         try:
             body = self.s3.get_object(key)
             return json.loads(body.decode())
         except ClientError as e:
-            error_code = e.response.get("Error", {}).get("Code", "")
-            if error_code in ("404", "NoSuchKey"):
+            if self._is_not_found_error(e):
                 return None
             raise
         except json.JSONDecodeError:
             return None
     
-    def get_version_manifest_pointer(self, dataset_id: str, version_ts: str) -> str:
+    def get_event_manifest_pointer(self, dataset_id: str, version_ts: str) -> str:
         """
-        Get manifest pointer path for a version.
+        Get manifest pointer path for an event.
         
         Returns the relative path within the bucket (without the "datasets/" prefix)
-        for use in SNS notifications. The consumer will construct the full S3 key
-        by combining the bucket name with this relative path.
+        for use in SNS notifications.
         
         Args:
             dataset_id: Dataset ID
@@ -141,9 +152,7 @@ class S3Catalog:
         Returns:
             Manifest pointer path (relative path within bucket, without "datasets/" prefix)
         """
-        # Return path without "datasets/" prefix for SNS consumers
-        # The full S3 key includes "datasets/" but the pointer should be relative to bucket root
-        return f"{dataset_id}/versions/{version_ts}/manifest.json"
+        return f"{dataset_id}/events/{version_ts}/manifest.json"
     
     def read_index(self, dataset_id: str) -> Optional[pd.DataFrame]:
         """Read index DataFrame."""
@@ -152,8 +161,7 @@ class S3Catalog:
             body = self.s3.get_object(key)
             return self.parquet_io.read_from_bytes(body)
         except ClientError as e:
-            error_code = e.response["Error"]["Code"]
-            if error_code in ("404", "NoSuchKey"):
+            if self._is_not_found_error(e):
                 return None
             raise
     
@@ -163,11 +171,11 @@ class S3Catalog:
         body = self.parquet_io.write_to_bytes(df)
         self.s3.put_object(key, body, content_type="application/x-parquet")
     
-    def write_outputs(
+    def write_events(
         self, dataset_id: str, version_ts: str, df: pd.DataFrame
     ) -> list[str]:
         """
-        Write output parquet files partitioned by year/month.
+        Write event parquet files partitioned by year/month.
         
         Partitions data by year/month based on obs_time or obs_date column.
         Uses Hive-style partitioning: year=YYYY/month=MM/part-*.parquet
@@ -178,10 +186,10 @@ class S3Catalog:
         if len(df) == 0:
             return []
         
-        prefix = self._outputs_prefix(dataset_id, version_ts)
-        output_keys = []
+        prefix = self._events_prefix(dataset_id, version_ts)
+        event_keys = []
         
-        # Determine date column (prefer obs_time, fallback to obs_date)
+
         date_col = None
         if "obs_time" in df.columns:
             date_col = "obs_time"
@@ -189,52 +197,97 @@ class S3Catalog:
             date_col = "obs_date"
         
         if date_col is None:
-            # No date column, write single file without partitioning
+
             key = f"{prefix}part-0.parquet"
             body = self.parquet_io.write_to_bytes(df)
             self.s3.put_object(key, body, content_type="application/x-parquet")
             return [key]
         
-        # Extract year and month from date column
+
         df_with_partitions = df.copy()
         if date_col == "obs_time":
             df_with_partitions["year"] = pd.to_datetime(df[date_col]).dt.year
             df_with_partitions["month"] = pd.to_datetime(df[date_col]).dt.month
-        else:  # obs_date
+        else:
             df_with_partitions["year"] = pd.to_datetime(df[date_col]).dt.year
             df_with_partitions["month"] = pd.to_datetime(df[date_col]).dt.month
         
-        # Group by year/month and write separate files
+
         for (year, month), group_df in df_with_partitions.groupby(["year", "month"]):
-            # Remove partition columns before writing
+
             group_df_clean = group_df.drop(columns=["year", "month"])
             
-            # Hive-style partition path
+
             partition_path = f"year={year}/month={month:02d}/"
             key = f"{prefix}{partition_path}part-0.parquet"
             
             body = self.parquet_io.write_to_bytes(group_df_clean)
             self.s3.put_object(key, body, content_type="application/x-parquet")
-            output_keys.append(key)
+            event_keys.append(key)
         
-        return output_keys
+        return event_keys
     
-    def write_run_staging(self, dataset_id: str, run_id: str, df: pd.DataFrame) -> None:
-        """Write staging normalized parquet."""
-        key = self._run_staging_key(dataset_id, run_id)
+    def list_events_for_month(self, dataset_id: str, year: int, month: int) -> list[str]:
+        """
+        List all event keys for a specific month.
+        
+        Args:
+            dataset_id: Dataset ID
+            year: Year
+            month: Month (1-12)
+            
+        Returns:
+            List of event keys for the month
+        """
+        prefix = f"datasets/{dataset_id}/events/"
+        
+        all_keys = self.s3.list_objects(prefix)
+        matching_keys = [
+            key for key in all_keys
+            if f"year={year}/month={month:02d}/part-0.parquet" in key
+        ]
+        
+        return sorted(matching_keys)
+    
+    def read_series_projection(
+        self, dataset_id: str, series_code: str, year: int, month: int
+    ) -> Optional[pd.DataFrame]:
+        """
+        Read series projection.
+        
+        Args:
+            dataset_id: Dataset ID
+            series_code: Series code
+            year: Year
+            month: Month (1-12)
+            
+        Returns:
+            DataFrame or None if not found
+        """
+        key = self._projection_series_key(dataset_id, series_code, year, month)
+        try:
+            body = self.s3.get_object(key)
+            return self.parquet_io.read_from_bytes(body)
+        except ClientError as e:
+            if self._is_not_found_error(e):
+                return None
+            raise
+    
+    def write_series_projection(
+        self, dataset_id: str, series_code: str, year: int, month: int, df: pd.DataFrame
+    ) -> None:
+        """
+        Write series projection.
+        
+        Args:
+            dataset_id: Dataset ID
+            series_code: Series code
+            year: Year
+            month: Month (1-12)
+            df: DataFrame to write
+        """
+        key = self._projection_series_key(dataset_id, series_code, year, month)
         body = self.parquet_io.write_to_bytes(df)
         self.s3.put_object(key, body, content_type="application/x-parquet")
     
-    def write_run_delta(self, dataset_id: str, run_id: str, df: pd.DataFrame) -> None:
-        """Write delta parquet."""
-        key = self._run_delta_key(dataset_id, run_id)
-        body = self.parquet_io.write_to_bytes(df)
-        self.s3.put_object(key, body, content_type="application/x-parquet")
-    
-    def write_run_raw(self, dataset_id: str, run_id: str, filename: str, body: bytes) -> str:
-        """Write raw file and return key."""
-        prefix = self._run_raw_prefix(dataset_id, run_id)
-        key = f"{prefix}{filename}"
-        self.s3.put_object(key, body)
-        return key
 

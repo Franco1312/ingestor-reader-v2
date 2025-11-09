@@ -19,7 +19,7 @@ class SNSPublisher:
     def publish(
         self,
         topic_arn: str,
-        message: dict[str, Any],  # type: ignore
+        message: dict[str, Any],
         subject: str,
         message_group_id: Optional[str] = None,
         message_deduplication_id: Optional[str] = None,

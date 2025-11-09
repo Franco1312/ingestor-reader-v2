@@ -22,16 +22,16 @@ def read_latest_dataset(
     month: int | None = None
 ) -> pd.DataFrame:
     """
-    Lee el último archivo publicado del dataset.
+    Lee proyecciones consolidadas del dataset.
     
     Args:
         dataset_id: ID del dataset (ej: bcra_infomondia_series)
         output_file: Archivo opcional para guardar el resultado (CSV o Parquet)
-        year: Año opcional para filtrar (ej: 2025)
-        month: Mes opcional para filtrar (ej: 11)
+        year: Año para leer (requerido si se especifica month)
+        month: Mes para leer (requerido si se especifica year)
     
     Returns:
-        DataFrame con todos los datos de la última versión publicada
+        DataFrame con datos consolidados de la proyección
     """
     # Cargar configuración
     load_env_file()
@@ -40,63 +40,35 @@ def read_latest_dataset(
     # Inicializar S3
     s3_storage = S3Storage(bucket=app_config.s3_bucket, region=app_config.aws_region)
     catalog = S3Catalog(s3_storage)
-    parquet_io = ParquetIO()
     
-    print(f"📊 Leyendo último dataset publicado: {dataset_id}")
+    print(f"📊 Leyendo proyecciones consolidadas: {dataset_id}")
     
-    # 1. Leer puntero actual
-    current_manifest = catalog.read_current_manifest(dataset_id)
-    if current_manifest is None:
-        raise FileNotFoundError(f"No se encontró versión publicada para {dataset_id}")
-    
-    version_ts = current_manifest["current_version"]
-    print(f"✅ Versión actual: {version_ts}")
-    
-    # 2. Leer manifest de la versión
-    manifest_key = f"datasets/{dataset_id}/versions/{version_ts}/manifest.json"
-    manifest_body = s3_storage.get_object(manifest_key)
-    manifest = Manifest.model_validate_json(manifest_body.decode())
-    
-    print(f"📁 Archivos de salida: {len(manifest.outputs.files)}")
-    
-    # 3. Filtrar archivos por año/mes si se especificó
-    files_to_read = manifest.outputs.files
+    # Si se especificó año y mes, leer solo ese mes
     if year is not None and month is not None:
-        filter_pattern = f"year={year}/month={month:02d}/"
-        files_to_read = [f for f in files_to_read if filter_pattern in f]
-        print(f"🔍 Filtrando por {year}-{month:02d}: {len(files_to_read)} archivos")
+        print(f"🔍 Leyendo proyección: {year}-{month:02d}")
+        df = catalog.read_projection(dataset_id, year, month)
+        if df is None:
+            raise FileNotFoundError(f"No se encontró proyección para {year}-{month:02d}")
+        
+        print(f"✅ Total de filas: {len(df)}")
+        print(f"📊 Columnas: {', '.join(df.columns)}")
+        
+        if output_file:
+            if output_file.endswith('.csv'):
+                df.to_csv(output_file, index=False)
+                print(f"💾 Guardado en: {output_file}")
+            elif output_file.endswith('.parquet'):
+                df.to_parquet(output_file, index=False)
+                print(f"💾 Guardado en: {output_file}")
+            else:
+                print(f"⚠️  Formato no reconocido, guardando como CSV: {output_file}.csv")
+                df.to_csv(f"{output_file}.csv", index=False)
+        
+        return df
     
-    # 4. Leer todos los archivos parquet filtrados
-    dataframes = []
-    for file_key in files_to_read:
-        print(f"  📄 Leyendo: {file_key}")
-        parquet_body = s3_storage.get_object(file_key)
-        file_df = parquet_io.read_from_bytes(parquet_body)
-        dataframes.append(file_df)
-    
-    # 5. Combinar todos los DataFrames
-    if not dataframes:
-        print("⚠️  No se encontraron archivos de datos")
-        return pd.DataFrame()
-    
-    combined_df = pd.concat(dataframes, ignore_index=True)
-    
-    print(f"✅ Total de filas: {len(combined_df)}")
-    print(f"📊 Columnas: {', '.join(combined_df.columns)}")
-    
-    # 6. Guardar si se especificó archivo de salida
-    if output_file:
-        if output_file.endswith('.csv'):
-            combined_df.to_csv(output_file, index=False)
-            print(f"💾 Guardado en: {output_file}")
-        elif output_file.endswith('.parquet'):
-            combined_df.to_parquet(output_file, index=False)
-            print(f"💾 Guardado en: {output_file}")
-        else:
-            print(f"⚠️  Formato no reconocido, guardando como CSV: {output_file}.csv")
-            combined_df.to_csv(f"{output_file}.csv", index=False)
-    
-    return combined_df
+    # Si no se especificó año/mes, leer todos los meses disponibles
+    # (Esto requeriría listar todas las proyecciones, por ahora requerimos año/mes)
+    raise ValueError("Debe especificar --year y --month para leer proyecciones")
 
 
 if __name__ == "__main__":

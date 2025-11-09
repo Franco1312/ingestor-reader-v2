@@ -31,7 +31,7 @@ class ParserBCRAREM(ParserPlugin):
             unit = series_config.get("unit")
             frequency = series_config.get("frequency")
             
-            # Read sheet
+
             df = pd.read_excel(
                 io.BytesIO(raw_bytes),
                 sheet_name=sheet_name,
@@ -39,7 +39,7 @@ class ParserBCRAREM(ParserPlugin):
                 engine="openpyxl",
             )
             
-            # Extract series (start_data_row is used if provided)
+
             series_df = _extract_series_from_sheet(
                 df, date_col, value_col, internal_series_code,
                 header_row, start_data_row, drop_na, unit, frequency

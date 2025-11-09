@@ -22,12 +22,12 @@ def load_config(dataset_id: str, config_path: Optional[str] = None) -> DatasetCo
         FileNotFoundError: If config file is not found
     """
     if config_path is None:
-        # Try local config/datasets/ directory (works in local and AWS if files are in package)
+
         local_path = Path("config/datasets") / f"{dataset_id}.yml"
         if local_path.exists():
             config_path = str(local_path)
         else:
-            # Try absolute path from package root (for AWS deployments)
+
             import ingestor_reader
             package_root = Path(ingestor_reader.__file__).parent.parent.parent
             absolute_path = package_root / "config" / "datasets" / f"{dataset_id}.yml"
@@ -43,7 +43,7 @@ def load_config(dataset_id: str, config_path: Optional[str] = None) -> DatasetCo
     with open(config_path, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f)
     
-    # Handle list format (multiple datasets) - find by dataset_id
+
     if isinstance(data, list):
         dataset_data = None
         for item in data:

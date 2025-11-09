@@ -32,7 +32,7 @@ class ParserINDECIPC(ParserPlugin):
             skip_headers = series_config.get("skip_headers", [])
             drop_na = series_config.get("drop_na", True)
             
-            # Read sheet
+
             df = pd.read_excel(
                 io.BytesIO(raw_bytes),
                 sheet_name=sheet_name,
@@ -40,7 +40,7 @@ class ParserINDECIPC(ParserPlugin):
                 engine="openpyxl",
             )
             
-            # Get column indices
+
             date_col_idx = _column_letter_to_index(date_col)
             value_col_idx = _column_letter_to_index(value_col)
             category_col_idx = _column_letter_to_index(category_col) if category_col else None
@@ -49,18 +49,18 @@ class ParserINDECIPC(ParserPlugin):
             value_col_name = df.columns[value_col_idx]
             category_col_name = df.columns[category_col_idx] if category_col_idx is not None else None
             
-            # Extract data starting from start_data_row
+
             data_df = df.iloc[start_data_row:].copy()
             
-            # Filter out skip headers
+
             if category_col_name and skip_headers:
                 data_df = data_df[~data_df[category_col_name].isin(skip_headers)]
             
-            # Get unit and frequency from series config
+
             unit = series_config.get("unit")
             frequency = series_config.get("frequency")
             
-            # Map categories to series codes
+
             for category_name, series_suffix in category_mapping.items():
                 category_data = data_df[data_df[category_col_name] == category_name].copy()
                 
@@ -73,7 +73,7 @@ class ParserINDECIPC(ParserPlugin):
                         "internal_series_code": internal_series_code,
                     })
                     
-                    # Add unit and frequency from config if provided
+
                     if unit is not None:
                         series_df["unit"] = unit
                     if frequency is not None:

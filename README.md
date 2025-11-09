@@ -8,7 +8,9 @@ A clean, production-ready ETL service that:
 - Reads data from HTTP, S3, or local files
 - Normalizes and validates data according to YAML configs
 - Computes incremental deltas using anti-join
-- Publishes versions atomically with CAS (Compare-And-Swap)
+- Uses Event Sourcing + CQRS architecture
+- Publishes events atomically with CAS (Compare-And-Swap)
+- Consolidates projections by series for efficient consumption
 
 ## Architecture
 
@@ -100,31 +102,39 @@ Para una descripción detallada de la estructura de datos en S3, ver [docs/S3_ST
 s3://<bucket>/datasets/<dataset_id>/
   configs/config.yaml              # Dataset config (optional, can use local)
   index/keys.parquet               # Primary key index
-  versions/<version_ts>/
-    manifest.json                   # Version manifest
-  runs/<run_id>/
-    raw/...                         # Raw source files
-    staging/normalized.parquet      # Normalized data
-    delta/added.parquet             # Delta (new rows)
-  outputs/<version_ts>/
-    data/year=YYYY/month=MM/part-*.parquet  # Published data (partitioned by year/month)
+  events/<version_ts>/             # Event Store (Event Sourcing)
+    manifest.json                  # Event manifest
+    data/year=YYYY/month=MM/part-*.parquet  # Immutable events
+  projections/                     # Read Models (CQRS)
+    windows/<series_code>/         # Series projections
+      year=YYYY/month=MM/data.parquet  # Consolidated projections
   current/
-    manifest.json                   # Pointer to current version (CAS)
+    manifest.json                  # Pointer to current version (CAS)
 ```
 
-## Atomic Publish
+## Architecture: Event Sourcing + CQRS
 
-The service uses Compare-And-Swap (CAS) to ensure atomic version publishing:
+The service uses **Event Sourcing** for immutable event storage and **CQRS** for optimized read models:
 
-1. Write all artifacts under `outputs/<version_ts>/`
-2. Write version manifest under `versions/<version_ts>/manifest.json`
+1. **Events** (`events/<version_ts>/`): Immutable incremental events (Event Sourcing)
+2. **Projections** (`projections/windows/<series_code>/`): Consolidated read models by series (CQRS)
+3. **Atomic Publishing**: CAS (Compare-And-Swap) ensures atomic event publishing
+
+### Atomic Publish
+
+The service uses Compare-And-Swap (CAS) to ensure atomic event publishing:
+
+1. Write all event data under `events/<version_ts>/data/`
+2. Write event manifest under `events/<version_ts>/manifest.json`
 3. Update `current/manifest.json` with `If-Match` header (ETag)
-4. If CAS fails (412), abort gracefully (pointer unchanged)
+4. Consolidate projections by series after successful publish
+5. If CAS fails (412), abort gracefully (pointer unchanged)
 
 This ensures that:
 - No partial publishes are visible
 - Concurrent runs don't corrupt the pointer
 - Failures before publish leave current version unchanged
+- Projections are always consistent with published events
 
 ## Incremental Logic
 
@@ -136,6 +146,9 @@ This ensures that:
 
 ## Concurrency Safety
 
+- **DynamoDB Locks**: Pipeline-level distributed locks prevent concurrent execution
+  - Configure via `DYNAMODB_LOCK_TABLE` environment variable
+  - See [docs/LOCKS.md](docs/LOCKS.md) for details
 - **S3 CAS**: Pointer update with `If-Match` header
   - Prevents concurrent pointer updates
   - One run succeeds, others fail gracefully
@@ -146,17 +159,12 @@ This ensures that:
 2. Run pipeline: `python -m ingestor_reader.app.main run-pipeline --dataset <dataset_id>`
 3. Config can also be stored in S3: `s3://<bucket>/datasets/<dataset_id>/configs/config.yaml`
 
-## Cleanup
+## Documentation
 
-Old run artifacts under `runs/<run_id>/` can be cleaned up periodically:
-
-```bash
-# List old runs (older than 7 days)
-aws s3 ls s3://<bucket>/datasets/<dataset_id>/runs/ --recursive
-
-# Delete old runs (be careful!)
-aws s3 rm s3://<bucket>/datasets/<dataset_id>/runs/<old_run_id>/ --recursive
-```
+- [S3 Structure](docs/S3_STRUCTURE.md): Complete S3 folder structure
+- [Storage Flow](docs/S3_STORAGE_FLOW.md): What, how, and when data is saved
+- [Flow Sequence](docs/FLOW_SEQUENCE.md): Step-by-step pipeline sequence
+- [Locks](docs/LOCKS.md): Distributed locking mechanism
 
 ## Testing
 

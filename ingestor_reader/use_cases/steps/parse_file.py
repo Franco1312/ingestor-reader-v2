@@ -22,7 +22,7 @@ def parse_file(
     Returns:
         Parsed DataFrame
     """
-    # Try plugin from dataset level first, then from parse config
+
     plugin_id = getattr(config, "plugin", None) or getattr(config.parse, "plugin", None)
     parser = get_parser(plugin_id, config)
     

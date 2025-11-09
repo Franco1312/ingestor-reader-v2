@@ -45,11 +45,11 @@ class S3Storage:
         Raises:
             ClientError: If conditional check fails (412)
         """
-        # For CAS: check current ETag matches before write
+
         if if_match:
             current_meta = self.head_object(key)
             if current_meta is None:
-                # First write: no existing object, allow it
+
                 pass
             elif current_meta["ETag"] != if_match:
                 raise ValueError("Conditional PUT failed: ETag mismatch")

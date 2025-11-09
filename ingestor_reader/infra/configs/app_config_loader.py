@@ -22,7 +22,7 @@ def load_app_config(env: str | None = None) -> AppConfig:
     if env not in ("local", "staging", "production"):
         raise ValueError(f"Invalid environment: {env}. Must be one of: local, staging, production")
     
-    # Import config module
+
     module_name = f"config.appconfig.{env}"
     try:
         config_module = importlib.import_module(module_name)

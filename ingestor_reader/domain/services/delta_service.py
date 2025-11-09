@@ -28,17 +28,17 @@ def compute_delta(
     Returns:
         DataFrame with only new rows
     """
-    # Compute key hashes for normalized data
+
     normalized_df = normalized_df.copy()
     normalized_df[hash_column] = normalized_df.apply(
         lambda row: compute_key_hash(row, primary_keys), axis=1
     )
     
-    # First run: all rows are new
+
     if index_df is None or len(index_df) == 0:
         return normalized_df
     
-    # Anti-join: keep rows not in index
+
     existing_hashes = set(index_df[hash_column].values)
     added_df = normalized_df[~normalized_df[hash_column].isin(existing_hashes)].copy()
     
@@ -64,7 +64,7 @@ def update_index(
     if current_index_df is None or len(current_index_df) == 0:
         return added_df[[hash_column]].copy()
     
-    # Append new hashes
+
     new_hashes = added_df[[hash_column]].copy()
     updated_index = pd.concat([current_index_df, new_hashes], ignore_index=True)
     return updated_index.drop_duplicates(subset=[hash_column], keep="first")

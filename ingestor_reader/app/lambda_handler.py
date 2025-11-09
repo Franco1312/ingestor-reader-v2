@@ -4,19 +4,19 @@ import logging
 import os
 from typing import Any
 
-# Import plugins to register them
-import ingestor_reader.infra.plugins  # noqa: F401
+
+import ingestor_reader.infra.plugins
 
 from ingestor_reader.infra.configs.config_loader import load_config
 from ingestor_reader.infra.configs.app_config_loader import load_app_config
 from ingestor_reader.use_cases.run_pipeline import run_pipeline
 
-# Configure logging for CloudWatch
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
-    force=True,  # Override any existing configuration
+    force=True,
 )
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         }
     """
     try:
-        # Extract parameters from event
+
         dataset_id = event.get("dataset_id")
         if not dataset_id:
             return {
@@ -61,12 +61,12 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         
         logger.info("Starting pipeline for dataset: %s", dataset_id)
         
-        # Load configurations from environment
+
         app_config = load_app_config()
         logger.info("Configuration loaded: verify_ssl=%s, s3_bucket=%s", app_config.verify_ssl, app_config.s3_bucket)
         dataset_config = load_config(dataset_id)
         
-        # Run pipeline
+
         run_result = run_pipeline(
             config=dataset_config,
             app_config=app_config,

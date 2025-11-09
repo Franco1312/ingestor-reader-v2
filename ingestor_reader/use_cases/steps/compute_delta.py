@@ -23,10 +23,10 @@ def compute_delta_step(
     Returns:
         DataFrame with only new rows
     """
-    logger.info(f"Computing delta from {len(normalized_df)} normalized rows")
+    logger.info("Computing delta from %d normalized rows", len(normalized_df))
     
     added_df = compute_delta(normalized_df, index_df, primary_keys)
     
-    logger.info(f"Delta: {len(added_df)} new rows")
+    logger.info("Delta: %d new rows", len(added_df))
     return added_df
 

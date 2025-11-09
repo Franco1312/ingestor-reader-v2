@@ -4,7 +4,7 @@ from typing import Optional
 from ingestor_reader.domain.plugins.base import ParserPlugin, NormalizerPlugin
 
 
-# In-memory registry
+
 PARSERS: dict[str, ParserPlugin] = {}
 NORMALIZERS: dict[str, NormalizerPlugin] = {}
 

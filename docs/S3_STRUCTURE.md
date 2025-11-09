@@ -10,26 +10,22 @@ s3://<bucket>/datasets/<dataset_id>/
 │   └── config.yaml                    # Configuración del dataset (opcional)
 ├── index/
 │   └── keys.parquet                   # Índice de primary keys (hash)
-├── runs/
-│   └── <run_id>/
-│       ├── raw/
-│       │   └── <filename>             # Archivo fuente original
-│       ├── staging/
-│       │   └── normalized.parquet     # Datos normalizados (sin metadata)
-│       └── delta/
-│           └── added.parquet          # Delta con key_hash (debugging)
-├── versions/
+├── events/                             # Event Store (Event Sourcing)
 │   └── <version_ts>/
-│       └── manifest.json              # Manifest de la versión
-├── outputs/
-│   └── <version_ts>/
+│       ├── manifest.json              # Manifest del evento
 │       └── data/
 │           ├── year=YYYY/
 │           │   └── month=MM/
-│           │       └── part-0.parquet  # Datos publicados particionados por año/mes
+│           │       └── part-0.parquet  # Delta del evento (inmutable)
 │           └── part-0.parquet          # (solo si no hay columna de fecha)
-└── current/
-    └── manifest.json                   # Puntero a versión actual (CAS)
+├── projections/                        # Read Models (CQRS)
+│   └── windows/
+│       └── year=YYYY/month=MM/
+│           └── data.parquet            # Proyección consolidada del mes
+├── current/
+│   └── manifest.json                   # Puntero a versión actual (CAS)
+└── metadata/
+    └── current.json                    # Estado actual (opcional)
 ```
 
 ## Descripción Detallada
@@ -91,84 +87,11 @@ f6e5d4c3b2a1...
 
 ---
 
-### 3. `runs/<run_id>/raw/<filename>`
+### 3. `events/<version_ts>/manifest.json`
 
-**Ruta:** `datasets/<dataset_id>/runs/<run_id>/raw/<filename>`
+**Ruta:** `datasets/<dataset_id>/events/<version_ts>/manifest.json`
 
-**Contenido:** Archivo fuente original tal como se descargó o leyó.
-
-**Formato:** Depende del origen (Excel, CSV, etc.)
-
-**Propósito:**
-- Auditoría y trazabilidad
-- Debugging
-- Reprocesamiento si es necesario
-
-**Ejemplo:**
-- `runs/eab62f46-2817-4fca-99b1-950151a759bf/raw/series.xlsm`
-
----
-
-### 4. `runs/<run_id>/staging/normalized.parquet`
-
-**Ruta:** `datasets/<dataset_id>/runs/<run_id>/staging/normalized.parquet`
-
-**Contenido:** Datos normalizados después del paso de parsing y normalización, pero **sin** metadata adicional.
-
-**Estructura:**
-```python
-DataFrame:
-  obs_time: datetime64[ns] (con timezone si está configurado)
-  value: float64
-  internal_series_code: string
-  # Columnas adicionales según el normalizer (ej: frequency, unit)
-```
-
-**Propósito:**
-- Datos intermedios para debugging
-- Permite inspeccionar el estado después de normalización
-- Útil para troubleshooting
-
-**Ejemplo:**
-```
-obs_time                          | value  | internal_series_code
-----------------------------------|--------|----------------------
-2024-01-01 00:00:00-03:00         | 350.5  | BCRA_TC_OFICIAL_A3500_PESOSxUSD_D
-2024-01-02 00:00:00-03:00         | 351.2  | BCRA_TC_OFICIAL_A3500_PESOSxUSD_D
-```
-
----
-
-### 5. `runs/<run_id>/delta/added.parquet`
-
-**Ruta:** `datasets/<dataset_id>/runs/<run_id>/delta/added.parquet`
-
-**Contenido:** Delta de filas nuevas con la columna `key_hash` incluida (para debugging).
-
-**Estructura:**
-```python
-DataFrame:
-  obs_time: datetime64[ns]
-  value: float64
-  internal_series_code: string
-  key_hash: string  # Hash de primary keys (solo para debugging)
-  # Columnas adicionales según el normalizer
-```
-
-**Propósito:**
-- Debugging del cálculo de delta
-- Verificar qué filas se consideraron nuevas
-- Validar el anti-join
-
-**Nota:** Este archivo solo se escribe si hay filas nuevas (`len(delta_df) > 0`).
-
----
-
-### 6. `versions/<version_ts>/manifest.json`
-
-**Ruta:** `datasets/<dataset_id>/versions/<version_ts>/manifest.json`
-
-**Contenido:** Manifest JSON con metadata de la versión publicada.
+**Contenido:** Manifest JSON con metadata del evento (versión incremental).
 
 **Estructura:**
 ```json
@@ -179,16 +102,15 @@ DataFrame:
   "source": {
     "files": [
       {
-        "path": "datasets/bcra_infomondia_series/runs/eab62f46-2817-4fca-99b1-950151a759bf/raw/series.xlsm",
         "sha256": "26d56d91b6cb26eb9503d72b23c2d6dbfbd1a9595e2f18d71e9f9e456...",
         "size": 7505424
       }
     ]
   },
   "outputs": {
-    "data_prefix": "datasets/bcra_infomondia_series/outputs/2025-11-07T05-51-43/data/",
+    "data_prefix": "datasets/bcra_infomondia_series/events/2025-11-07T05-51-43/data/",
     "files": [
-      "datasets/bcra_infomondia_series/outputs/2025-11-07T05-51-43/data/part-0.parquet"
+      "datasets/bcra_infomondia_series/events/2025-11-07T05-51-43/data/year=2024/month=11/part-0.parquet"
     ],
     "rows_total": 85360,
     "rows_added_this_version": 85360
@@ -202,19 +124,19 @@ DataFrame:
 ```
 
 **Propósito:**
-- Metadata completa de cada versión
-- Trazabilidad de cambios
-- Historial de versiones
+- Metadata completa de cada evento
+- Trazabilidad de cambios (Event Sourcing)
+- Historial completo de eventos (inmutables)
 
-**Nota:** Cada versión tiene su propio manifest, incluso si no se publicó (CAS falló).
+**Nota:** Cada evento tiene su propio manifest, incluso si no se publicó (CAS falló).
 
 ---
 
-### 7. `outputs/<version_ts>/data/year=YYYY/month=MM/part-0.parquet`
+### 4. `events/<version_ts>/data/year=YYYY/month=MM/part-0.parquet`
 
-**Ruta:** `datasets/<dataset_id>/outputs/<version_ts>/data/year=YYYY/month=MM/part-0.parquet`
+**Ruta:** `datasets/<dataset_id>/events/<version_ts>/data/year=YYYY/month=MM/part-0.parquet`
 
-**Contenido:** Datos finales publicados con todas las columnas de metadata, particionados por año y mes.
+**Contenido:** Delta del evento (filas nuevas) con todas las columnas de metadata, particionados por año y mes.
 
 **Estructura:**
 ```python
@@ -234,9 +156,10 @@ DataFrame:
 ```
 
 **Propósito:**
-- Datos finales para consumo
-- Incluye solo el delta (filas nuevas) en modo incremental
-- Listo para ser consumido por sistemas downstream
+- Evento inmutable (Event Sourcing)
+- Incluye solo el delta (filas nuevas) de esta versión
+- Usado para auditoría y trazabilidad
+- **No se usa directamente para lectura** (usar proyecciones)
 
 **Ejemplo:**
 ```
@@ -258,14 +181,56 @@ bcra_...   | BCRA     | D         | ...  | API         | 2024-01-01 00:00:00-03:
 - **Compatibilidad:** Formato Hive-style compatible con Spark, Athena, etc.
 
 **Nota:** 
-- La columna `key_hash` **NO** está incluida en los outputs finales
+- La columna `key_hash` **NO** está incluida en los eventos
 - Solo contiene filas nuevas (delta) en modo incremental
 - En la primera ejecución, contiene todas las filas
-- Cada versión puede tener múltiples particiones (una por año/mes presente en los datos)
+- Cada evento puede tener múltiples particiones (una por año/mes presente en los datos)
+- **Inmutable**: Los eventos nunca se modifican
 
 ---
 
-### 8. `current/manifest.json`
+### 5. `projections/windows/year=YYYY/month=MM/data.parquet`
+
+**Ruta:** `datasets/<dataset_id>/projections/windows/year=YYYY/month=MM/data.parquet`
+
+**Contenido:** Proyección consolidada del mes (todos los datos del mes consolidados desde eventos).
+
+**Estructura:**
+```python
+DataFrame:
+  dataset_id: string
+  provider: string
+  frequency: string
+  unit: string
+  source_kind: string ("FILE" / "API")
+  obs_time: datetime64[ns, tz]
+  obs_date: date
+  value: float64
+  internal_series_code: string
+  version: string
+  vintage_date: datetime
+  quality_flag: string ("OK" / "OUTLIER" / "IMPUTED")
+```
+
+**Propósito:**
+- **Datos consolidados para lectura** (Read Model - CQRS)
+- Contiene todos los datos del mes (consolidados desde todos los eventos)
+- Optimizado para lectura simple
+- Se regenera periódicamente desde eventos
+
+**Ventajas:**
+- **Lectura simple**: Una lectura por mes
+- **Sin concatenación**: No necesitas leer múltiples versiones
+- **Eficiente**: Optimizado para consultas por ventana de tiempo
+
+**Nota:**
+- Se regenera desde eventos (no se modifica incrementalmente)
+- Si se corrompe, puede regenerarse desde eventos
+- Puede tener delay (se consolida después de publicar eventos)
+
+---
+
+### 6. `current/manifest.json`
 
 **Ruta:** `datasets/<dataset_id>/current/manifest.json`
 
@@ -300,37 +265,53 @@ bcra_...   | BCRA     | D         | ...  | API         | 2024-01-01 00:00:00-03:
 
 ### Durante la Ejecución del Pipeline
 
-1. **Fetch & Store Raw:**
-   - Escribe `runs/<run_id>/raw/<filename>`
+1. **Fetch Resource:**
+   - Descarga el archivo fuente (no se guarda en S3)
 
 2. **Parse & Normalize:**
-   - Escribe `runs/<run_id>/staging/normalized.parquet`
+   - Procesa el archivo en memoria (no escribe en S3)
 
 3. **Compute Delta:**
-   - Si hay filas nuevas, escribe `runs/<run_id>/delta/added.parquet`
+   - Calcula qué filas son nuevas usando el índice (no escribe en S3)
 
 4. **Enrich Metadata:**
    - Prepara DataFrame con metadata (no escribe aún)
 
-5. **Write Outputs:**
-   - Particiona y escribe `outputs/<version_ts>/data/year=YYYY/month=MM/part-0.parquet` (solo delta enriquecido)
+5. **Write Events:**
+   - Particiona y escribe `events/<version_ts>/data/year=YYYY/month=MM/part-0.parquet` (solo delta enriquecido)
    - Crea una partición por cada año/mes presente en los datos
+   - **Inmutable**: Cada evento es único, nunca se sobrescribe
 
-6. **Publish Version:**
-   - Escribe `versions/<version_ts>/manifest.json`
+6. **Publish Event:**
+   - Escribe `events/<version_ts>/manifest.json`
    - Intenta actualizar `current/manifest.json` con CAS
    - Si CAS exitoso: actualiza `index/keys.parquet`
    - Si CAS falla: no actualiza el índice ni el puntero
 
+7. **Consolidate Projection:**
+   - Para cada año/mes afectado:
+     - Lista todos los eventos del mes
+     - Lee todos los eventos
+     - Consolida (concatena y elimina duplicados)
+     - Escribe `projections/windows/year=YYYY/month=MM/data.parquet`
+   - **Regenera**: Proyección se regenera desde eventos, no se modifica incrementalmente
+
 ### Orden de Operaciones (Atomicidad)
 
 ```
-1. Write outputs/<version_ts>/data/year=YYYY/month=MM/part-0.parquet (una por partición)
-2. Write versions/<version_ts>/manifest.json
+1. Write events/<version_ts>/data/year=YYYY/month=MM/part-0.parquet (una por partición)
+2. Write events/<version_ts>/manifest.json
 3. CAS update: current/manifest.json (con If-Match)
 4. If CAS success: write index/keys.parquet
 5. If CAS fails: abort (index y pointer no cambian)
+6. If CAS success: consolidate projections/windows/year=YYYY/month=MM/data.parquet
 ```
+
+**Nota:** El pipeline escribe:
+- `events/` - Eventos incrementales (inmutables, para auditoría)
+- `projections/` - Proyecciones consolidadas (para lectura)
+- `current/` - Puntero actual
+- `index/` - Índice de primary keys
 
 ---
 
@@ -357,9 +338,8 @@ bcra_...   | BCRA     | D         | ...  | API         | 2024-01-01 00:00:00-03:
 
 **Nota:** El pipeline no elimina archivos automáticamente. Se recomienda:
 
-- **Runs:** Retener por un período definido (ej: 30 días) para debugging
-- **Versions:** Retener todas las versiones para historial completo
-- **Outputs:** Retener todas las versiones para reconstrucción completa
+- **Events:** Retener todos los eventos para historial completo (Event Sourcing)
+- **Projections:** Pueden regenerarse desde eventos si es necesario
 - **Index:** Siempre mantener (es necesario para el cálculo de delta)
 - **Current:** Siempre mantener (puntero crítico)
 
@@ -373,43 +353,25 @@ Para un dataset `bcra_infomondia_series` con dos ejecuciones:
 s3://bucket/datasets/bcra_infomondia_series/
 ├── index/
 │   └── keys.parquet
-├── runs/
-│   ├── eab62f46-2817-4fca-99b1-950151a759bf/
-│   │   ├── raw/
-│   │   │   └── series.xlsm
-│   │   ├── staging/
-│   │   │   └── normalized.parquet
-│   │   └── delta/
-│   │       └── added.parquet
-│   └── f1c23d45-3928-5gdb-00c2-061262b860cg/
-│       ├── raw/
-│       │   └── series.xlsm
-│       ├── staging/
-│       │   └── normalized.parquet
-│       └── delta/
-│           └── added.parquet
-├── versions/
+├── events/
 │   ├── 2025-11-07T05-51-43/
-│   │   └── manifest.json
-│   └── 2025-11-07T06-15-22/
-│       └── manifest.json
-├── outputs/
-│   ├── 2025-11-07T05-51-43/
+│   │   ├── manifest.json
 │   │   └── data/
-│   │       ├── year=2024/
-│   │       │   ├── month=01/
-│   │       │   │   └── part-0.parquet
-│   │       │   ├── month=02/
-│   │       │   │   └── part-0.parquet
-│   │       │   └── ...
-│   │       └── year=2025/
-│   │           └── month=11/
-│   │               └── part-0.parquet
+│   │       ├── year=2024/month=01/part-0.parquet
+│   │       ├── year=2024/month=02/part-0.parquet
+│   │       └── ...
 │   └── 2025-11-07T06-15-22/
+│       ├── manifest.json
 │       └── data/
-│           └── year=2025/
-│               └── month=11/
-│                   └── part-0.parquet
+│           └── year=2025/month=11/part-0.parquet
+├── projections/
+│   └── windows/
+│       ├── year=2024/
+│       │   ├── month=01/data.parquet  # Consolidado de todos los eventos de enero
+│       │   ├── month=02/data.parquet
+│       │   └── ...
+│       └── year=2025/
+│           └── month=11/data.parquet  # Consolidado de todos los eventos de noviembre
 └── current/
     └── manifest.json  # Apunta a 2025-11-07T06-15-22
 ```
@@ -418,7 +380,51 @@ s3://bucket/datasets/bcra_infomondia_series/
 
 ## Lectura de Datos
 
-### Para Consumir Datos Publicados
+### Para Consumir Datos (Recomendado: Usar Proyecciones)
+
+**Lectura simple usando proyecciones consolidadas:**
+
+1. **Leer un mes completo:**
+   ```python
+   # Leer noviembre 2024
+   df = pd.read_parquet("s3://bucket/datasets/<dataset_id>/projections/windows/year=2024/month=11/data.parquet")
+   ```
+
+2. **Leer un año completo:**
+   ```python
+   # Leer 2024 completo
+   dataframes = []
+   for month in range(1, 13):
+       df = pd.read_parquet(f"s3://bucket/datasets/<dataset_id>/projections/windows/year=2024/month={month:02d}/data.parquet")
+       dataframes.append(df)
+   
+   complete_year = pd.concat(dataframes, ignore_index=True)
+   ```
+
+3. **Leer múltiples meses:**
+   ```python
+   # Leer últimos 3 meses
+   from datetime import datetime, timedelta
+   now = datetime.now()
+   dataframes = []
+   for i in range(3):
+       month_date = now - timedelta(days=30*i)
+       year = month_date.year
+       month = month_date.month
+       df = pd.read_parquet(f"s3://bucket/datasets/<dataset_id>/projections/windows/year={year}/month={month:02d}/data.parquet")
+       dataframes.append(df)
+   
+   recent_data = pd.concat(dataframes, ignore_index=True)
+   ```
+
+**Ventajas:**
+- ✅ **Simple**: Una lectura por mes
+- ✅ **Eficiente**: Sin necesidad de leer múltiples versiones
+- ✅ **Rápido**: Datos ya consolidados
+
+### Para Auditoría (Usar Eventos)
+
+Si necesitas auditoría o trazabilidad, puedes leer eventos directamente:
 
 1. **Leer puntero actual:**
    ```python
@@ -426,63 +432,32 @@ s3://bucket/datasets/bcra_infomondia_series/
    version = current_manifest["current_version"]
    ```
 
-2. **Leer manifest de versión:**
+2. **Leer manifest del evento:**
    ```python
-   manifest = read_json(f"s3://bucket/datasets/<dataset_id>/versions/{version}/manifest.json")
-   output_files = manifest["outputs"]["files"]
+   manifest = read_json(f"s3://bucket/datasets/<dataset_id>/events/{version}/manifest.json")
+   event_files = manifest["outputs"]["files"]
    ```
 
-3. **Leer todos los datos de la versión:**
+3. **Leer todos los eventos de un mes:**
    ```python
-   for file_key in output_files:
-       df = pd.read_parquet(f"s3://bucket/{file_key}")
+   # Listar todos los eventos de noviembre 2024
+   event_keys = catalog.list_events_for_month(dataset_id, 2024, 11)
+   for event_key in event_keys:
+       df = pd.read_parquet(f"s3://bucket/{event_key}")
+       # Procesar evento
    ```
-
-4. **Leer solo datos de un año/mes específico (más eficiente):**
-   ```python
-   # Leer solo datos de noviembre 2025
-   data_prefix = manifest["outputs"]["data_prefix"]
-   df = pd.read_parquet(f"s3://bucket/{data_prefix}year=2025/month=11/")
-   ```
-
-5. **Leer solo datos recientes (últimos meses):**
-   ```python
-   # Leer últimos 3 meses
-   from datetime import datetime, timedelta
-   now = datetime.now()
-   for i in range(3):
-       month_date = now - timedelta(days=30*i)
-       year = month_date.year
-       month = month_date.month
-       df = pd.read_parquet(f"s3://bucket/{data_prefix}year={year}/month={month:02d}/")
-   ```
-
-### Para Reconstruir Dataset Completo
-
-1. Leer todos los manifests en `versions/`
-2. Ordenar por `created_at`
-3. Leer todos los `outputs/<version>/data/year=*/month=*/part-*.parquet` en orden
-4. Concatenar DataFrames
-
-**Nota:** Con particionamiento, puedes reconstruir solo un rango específico:
-```python
-# Reconstruir solo datos de 2024
-data_prefix = "datasets/<dataset_id>/outputs/"
-for version in sorted_versions:
-    for month in range(1, 13):
-        path = f"{data_prefix}{version}/data/year=2024/month={month:02d}/"
-        df = pd.read_parquet(f"s3://bucket/{path}")
-```
 
 ---
 
 ## Notas Importantes
 
-1. **Incremental:** Los outputs solo contienen filas nuevas (delta), no el dataset completo
-2. **Atomicidad:** El puntero `current/manifest.json` se actualiza con CAS para garantizar atomicidad
-3. **Consistencia:** El índice se actualiza solo después de una publicación exitosa
-4. **Metadata:** Los outputs finales incluyen todas las columnas de metadata estándar
-5. **Debugging:** Los archivos en `runs/` son útiles para debugging pero no son necesarios para consumo
+1. **Event Sourcing:** Los eventos son inmutables y contienen solo el delta (filas nuevas)
+2. **CQRS:** Las proyecciones son read models optimizados para lectura, regeneradas desde eventos
+3. **Atomicidad:** El puntero `current/manifest.json` se actualiza con CAS para garantizar atomicidad
+4. **Consistencia:** El índice se actualiza solo después de una publicación exitosa
+5. **Metadata:** Los eventos y proyecciones incluyen todas las columnas de metadata estándar
+6. **Inmutabilidad:** Los eventos nunca se modifican, solo se agregan nuevos
+7. **Regeneración:** Las proyecciones se regeneran desde eventos, no se modifican incrementalmente
 
 ---
 
@@ -492,18 +467,18 @@ for version in sorted_versions:
 
 El pipeline está diseñado para ser **idempotente** y **seguro ante fallos**. Aquí está qué pasa en cada escenario:
 
-#### 1. **Fallo antes de escribir outputs** (líneas 193-199)
+#### 1. **Fallo antes de escribir eventos** (líneas 193-199)
 - **Estado:** No se escribió nada a S3
 - **Resultado:** No hay datos huérfanos, todo limpio
 - **Acción:** Simplemente reintentar el pipeline
 
-#### 2. **Fallo después de escribir outputs pero antes de CAS** (líneas 117-120)
+#### 2. **Fallo después de escribir eventos pero antes de CAS** (líneas 117-120)
 - **Estado:**
-  - ✅ Outputs escritos en `outputs/<version_ts>/data/...`
-  - ✅ Manifest de versión escrito en `versions/<version_ts>/manifest.json`
-  - ✅ Datos de staging/delta escritos en `runs/<run_id>/...`
+  - ✅ Eventos escritos en `events/<version_ts>/data/...`
+  - ✅ Manifest de evento escrito en `events/<version_ts>/manifest.json`
   - ❌ Puntero `current/manifest.json` **NO** actualizado
   - ❌ Índice `index/keys.parquet` **NO** actualizado
+  - ❌ Proyecciones **NO** consolidadas
 - **Resultado:** 
   - Los datos existen pero **no son visibles** (el puntero no apunta a ellos)
   - Son "datos huérfanos" - existen pero no se consumen
@@ -515,20 +490,22 @@ El pipeline está diseñado para ser **idempotente** y **seguro ante fallos**. A
 
 #### 3. **Fallo durante CAS** (línea 97)
 - **Estado:**
-  - ✅ Outputs escritos
-  - ✅ Manifest de versión escrito
+  - ✅ Eventos escritos
+  - ✅ Manifest de evento escrito
   - ❌ CAS falla (ETag no coincide - posible ejecución concurrente)
   - ❌ Puntero **NO** actualizado
   - ❌ Índice **NO** actualizado
+  - ❌ Proyecciones **NO** consolidadas
 - **Resultado:** Igual que el caso 2 - datos huérfanos
 - **Acción:** El pipeline detecta el fallo y retorna `published=False`
 
 #### 4. **Fallo después de CAS exitoso pero antes de actualizar índice** (línea 101)
 - **Estado:**
-  - ✅ Outputs escritos
-  - ✅ Manifest de versión escrito
+  - ✅ Eventos escritos
+  - ✅ Manifest de evento escrito
   - ✅ Puntero actualizado (CAS exitoso)
   - ❌ Índice **NO** actualizado (fallo al escribir)
+  - ❌ Proyecciones **NO** consolidadas
 - **Resultado:** 
   - **Inconsistencia:** El puntero apunta a una versión nueva pero el índice no está actualizado
   - En la próxima ejecución, el delta se calculará incorrectamente (usará el índice viejo)
@@ -552,9 +529,8 @@ El pipeline usa **rollback natural**:
 ### Datos Huérfanos
 
 Los datos huérfanos (escritos pero no publicados) quedan en:
-- `outputs/<version_ts>/data/...` - No se consumen (puntero no apunta)
-- `versions/<version_ts>/manifest.json` - Existe pero no se usa
-- `runs/<run_id>/...` - Siempre se guardan para debugging
+- `events/<version_ts>/data/...` - No se consumen (puntero no apunta)
+- `events/<version_ts>/manifest.json` - Existe pero no se usa
 
 **Limpieza:**
 - Los datos huérfanos pueden limpiarse manualmente
