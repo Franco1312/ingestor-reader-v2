@@ -25,9 +25,38 @@ def _extract_year_month(df: pd.DataFrame, date_col: str) -> pd.DataFrame:
     df_with_partitions = df.copy()
     df_with_partitions["year"] = pd.to_datetime(df_with_partitions[date_col], errors="coerce").dt.year
     df_with_partitions["month"] = pd.to_datetime(df_with_partitions[date_col], errors="coerce").dt.month
-    
-
     return df_with_partitions.dropna(subset=["year", "month"])
+
+
+def _get_affected_months(df: pd.DataFrame) -> list[tuple[int, int]]:
+    """
+    Get list of affected (year, month) tuples from DataFrame.
+    
+    Args:
+        df: DataFrame with year and month columns
+        
+    Returns:
+        List of (year, month) tuples
+    """
+    months = df[["year", "month"]].drop_duplicates()
+    return [(int(row["year"]), int(row["month"])) for _, row in months.iterrows()]
+
+
+def _is_already_consolidated(catalog: S3Catalog, dataset_id: str, year: int, month: int) -> bool:
+    """
+    Check if month is already consolidated.
+    
+    Args:
+        catalog: S3 catalog instance
+        dataset_id: Dataset ID
+        year: Year
+        month: Month (1-12)
+        
+    Returns:
+        True if already consolidated, False otherwise
+    """
+    manifest = catalog.read_consolidation_manifest(dataset_id, year, month)
+    return manifest is not None and manifest.get("status") == "completed"
 
 
 def _write_series_projections(
@@ -38,7 +67,9 @@ def _write_series_projections(
     series_projections: dict[str, pd.DataFrame],
 ) -> None:
     """
-    Write all series projections for a month.
+    Write all series projections for a month using WAL pattern.
+    
+    Writes to temporary location first, then moves atomically to final location.
     
     Args:
         catalog: S3 catalog instance
@@ -46,17 +77,23 @@ def _write_series_projections(
         year: Year
         month: Month (1-12)
         series_projections: Dict mapping series_code to consolidated DataFrame
+        
+    Raises:
+        Exception: If any write or move operation fails
     """
+    # Write all projections to temporary location
     for series_code, consolidated_df in series_projections.items():
-        try:
-            catalog.write_series_projection(
-                dataset_id, series_code, year, month, consolidated_df
-            )
-            logger.info("Written series projection for %s %d-%02d (%d rows)", 
-                       series_code, year, month, len(consolidated_df))
-        except Exception as e:
-            logger.error("Failed to write series projection for %s %d-%02d: %s", 
-                       series_code, year, month, e)
+        catalog.write_series_projection_temp(
+            dataset_id, series_code, year, month, consolidated_df
+        )
+        logger.debug("Written temp projection for %s %d-%02d (%d rows)", 
+                   series_code, year, month, len(consolidated_df))
+    
+    # Move all projections atomically from temp to final
+    for series_code in series_projections.keys():
+        catalog.move_series_projection_from_temp(dataset_id, series_code, year, month)
+        logger.info("Moved projection for %s %d-%02d to final location", 
+                   series_code, year, month)
 
 
 def consolidate_projection_step(
@@ -78,33 +115,26 @@ def consolidate_projection_step(
     if len(enriched_delta_df) == 0:
         return
     
-    logger.info("Consolidating projections for affected months")
-    
-
     date_col = find_date_column(enriched_delta_df)
     if date_col is None:
         logger.warning("No date column found, skipping consolidation")
         return
     
-
-    df_with_partitions = _extract_year_month(enriched_delta_df, date_col)
-    
-
-    if "internal_series_code" not in df_with_partitions.columns:
+    if "internal_series_code" not in enriched_delta_df.columns:
         logger.warning("No internal_series_code column found, skipping consolidation")
         return
     
-
-    affected_months = df_with_partitions[["year", "month"]].drop_duplicates()
+    df_with_partitions = _extract_year_month(enriched_delta_df, date_col)
+    affected_months = _get_affected_months(df_with_partitions)
     
-    logger.info("Processing %d affected month(s)", len(affected_months))
+    if not affected_months:
+        logger.info("No valid months found, skipping consolidation")
+        return
     
-    for _, row in affected_months.iterrows():
-        year = int(row["year"])
-        month = int(row["month"])
-        
+    logger.info("Consolidating projections for %d affected month(s)", len(affected_months))
+    
+    for year, month in affected_months:
         try:
-
             _consolidate_month(
                 catalog, config, year, month, config.normalize.primary_keys
             )
@@ -121,7 +151,9 @@ def _consolidate_month(
     primary_keys: list[str],
 ) -> None:
     """
-    Consolidate projections for a specific month.
+    Consolidate projections for a specific month with restart resilience.
+    
+    Uses manifest for idempotency and WAL pattern for atomic writes.
     
     Args:
         catalog: S3 catalog instance
@@ -130,21 +162,39 @@ def _consolidate_month(
         month: Month (1-12)
         primary_keys: Primary key columns
     """
-
-    series_projections = consolidate_month_projections(
-        catalog,
-        config.dataset_id,
-        year,
-        month,
-        primary_keys,
-    )
+    dataset_id = config.dataset_id
     
-
-    _write_series_projections(
-        catalog,
-        config.dataset_id,
-        year,
-        month,
-        series_projections,
-    )
+    # Check if already consolidated (idempotency)
+    if _is_already_consolidated(catalog, dataset_id, year, month):
+        logger.info("Skipping %d-%02d (already consolidated)", year, month)
+        return
+    
+    # Clean up any leftover temp files
+    catalog.cleanup_temp_projections(dataset_id, year, month)
+    
+    # Mark as in progress
+    catalog.write_consolidation_manifest(dataset_id, year, month, status="in_progress")
+    
+    try:
+        # Consolidate all events for the month
+        series_projections = consolidate_month_projections(
+            catalog, dataset_id, year, month, primary_keys
+        )
+        
+        if not series_projections:
+            logger.warning("No series projections to write for %d-%02d", year, month)
+            return
+        
+        # Write all projections using WAL pattern (temp -> final)
+        _write_series_projections(catalog, dataset_id, year, month, series_projections)
+        
+        # Mark as completed
+        catalog.write_consolidation_manifest(dataset_id, year, month, status="completed")
+        logger.info("Completed consolidation for %d-%02d (%d series)", 
+                   year, month, len(series_projections))
+        
+    except Exception as e:
+        logger.error("Failed to consolidate %d-%02d: %s", year, month, e)
+        catalog.cleanup_temp_projections(dataset_id, year, month)
+        raise
 
