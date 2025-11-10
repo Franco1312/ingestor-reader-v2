@@ -38,7 +38,6 @@ class DatasetConfig(BaseModel):
     """Dataset configuration."""
     dataset_id: str
     frequency: str
-    lag_days: int
     source: SourceConfig
     parse: ParseConfig
     normalize: NormalizeConfig

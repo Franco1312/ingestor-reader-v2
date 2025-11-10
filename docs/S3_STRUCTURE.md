@@ -11,6 +11,10 @@ s3://<bucket>/datasets/<dataset_id>/
 ├── index/
 │   └── keys.parquet                   # Índice de primary keys (hash)
 ├── events/                             # Event Store (Event Sourcing)
+│   ├── index/                          # Índice de eventos por mes (optimización)
+│   │   └── YYYY/
+│   │       └── MM/
+│   │           └── versions.json      # Lista de versiones con eventos para el mes
 │   └── <version_ts>/
 │       ├── manifest.json              # Manifest del evento
 │       └── data/
@@ -189,7 +193,66 @@ bcra_...   | BCRA     | D         | ...  | API         | 2024-01-01 00:00:00-03:
 
 ---
 
-### 5. `projections/windows/year=YYYY/month=MM/data.parquet`
+### 5. `events/index/YYYY/MM/versions.json` (Índice de Eventos)
+
+**Ruta:** `datasets/<dataset_id>/events/index/YYYY/MM/versions.json`
+
+**Contenido:** Índice JSON que lista todas las versiones que tienen eventos para un mes específico.
+
+**Estructura:**
+```json
+{
+  "dataset_id": "bcra_infomondia_series",
+  "year": 2007,
+  "month": 8,
+  "versions": [
+    "2025-11-09T23-04-09",
+    "2025-11-10T10-00-00",
+    "2025-11-11T15-30-00"
+  ],
+  "last_updated": "2025-11-11T15:30:00Z",
+  "event_count": 3
+}
+```
+
+**Propósito:**
+- **Optimización de performance**: Evita listar todos los objetos en S3 para encontrar eventos de un mes
+- **Búsqueda rápida**: Permite encontrar rápidamente qué versiones tienen eventos para un mes
+- **Escalabilidad**: No depende del número total de versiones, solo del número de versiones por mes
+
+**Actualización:**
+- Se actualiza automáticamente cuando se escriben eventos nuevos para el mes
+- Se crea automáticamente si no existe cuando se lista eventos (fallback)
+- Solo se agregan versiones, nunca se eliminan (acumulativo)
+
+**Comportamiento:**
+1. **Ruta rápida (con índice):**
+   - Lee el índice JSON (pequeño, rápido)
+   - Construye las claves de eventos desde las versiones del índice
+   - Retorna las claves sin listar objetos en S3
+
+2. **Ruta lenta (sin índice):**
+   - Lista todos los objetos bajo `events/` (puede ser lento con muchas versiones)
+   - Filtra por año/mes
+   - Crea el índice para futuras consultas
+
+**Ventajas:**
+- **Performance**: Una lectura de JSON pequeño vs. listar miles de objetos
+- **Escalable**: No depende del número total de versiones
+- **Automático**: Se actualiza y crea automáticamente
+
+**Riesgos conocidos:**
+- **Desincronización**: Si se eliminan eventos manualmente, el índice puede quedar desactualizado
+- **Race conditions**: Si dos procesos escriben eventos simultáneamente, puede haber pérdida de versiones en el índice
+- **Acumulación**: El índice solo crece, nunca se limpia automáticamente
+
+**Mitigación:**
+- El fallback detecta eventos faltantes y reconstruye el índice si es necesario
+- Los errores al leer eventos se manejan en `_read_events_for_month`
+
+---
+
+### 6. `projections/windows/year=YYYY/month=MM/data.parquet`
 
 **Ruta:** `datasets/<dataset_id>/projections/windows/year=YYYY/month=MM/data.parquet`
 
@@ -230,7 +293,7 @@ DataFrame:
 
 ---
 
-### 6. `current/manifest.json`
+### 7. `current/manifest.json`
 
 **Ruta:** `datasets/<dataset_id>/current/manifest.json`
 

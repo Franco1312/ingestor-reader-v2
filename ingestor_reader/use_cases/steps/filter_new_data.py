@@ -1,12 +1,11 @@
 """Filter new data by date step."""
-import logging
 from typing import Optional
 import pandas as pd
 
 from ingestor_reader.infra.s3_catalog import S3Catalog
-from ingestor_reader.use_cases.steps.utils import find_date_column
+from ingestor_reader.infra.common import get_logger, find_date_column
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def _get_max_date_from_file(catalog: S3Catalog, file_key: str) -> Optional[pd.Timestamp]:

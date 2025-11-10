@@ -1,11 +1,11 @@
 """Check if source file changed step."""
-import logging
 from typing import Optional
 
 from ingestor_reader.infra.s3_catalog import S3Catalog
 from ingestor_reader.use_cases.steps.fetch_resource import compute_file_hash
+from ingestor_reader.infra.common import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def check_source_changed(

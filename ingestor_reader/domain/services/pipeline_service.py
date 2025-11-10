@@ -1,27 +1,13 @@
 """Pipeline service utilities."""
-from datetime import datetime, timezone
-import uuid
+from ingestor_reader.infra.common.clock import get_clock
 
 
 def generate_run_id() -> str:
     """Generate a unique run ID."""
-    return str(uuid.uuid4())
+    return get_clock().generate_uuid()
 
 
 def generate_version_ts() -> str:
     """Generate version timestamp in ISO format."""
-    return datetime.now(timezone.utc).isoformat().replace(":", "-").split(".")[0]
-
-
-def format_version_ts(ts: str) -> str:
-    """Format version timestamp for display."""
-    return ts.replace("-", ":").replace("T", " ")
-
-
-def compute_stats(df) -> dict[str, int]:
-    """Compute basic statistics from DataFrame."""
-    return {
-        "rows": len(df),
-        "columns": len(df.columns) if hasattr(df, "columns") else 0,
-    }
+    return get_clock().generate_version_ts()
 

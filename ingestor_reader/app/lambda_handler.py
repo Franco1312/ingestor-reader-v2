@@ -1,24 +1,19 @@
 """AWS Lambda handler."""
 import json
-import logging
-import os
 from typing import Any
-
 
 import ingestor_reader.infra.plugins
 
-from ingestor_reader.infra.configs.config_loader import load_config
-from ingestor_reader.infra.configs.app_config_loader import load_app_config
+from ingestor_reader.infra.common import (
+    load_app_config,
+    load_dataset_config,
+    setup_logging,
+    get_logger,
+)
 from ingestor_reader.use_cases.run_pipeline import run_pipeline
 
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    force=True,
-)
-logger = logging.getLogger(__name__)
+setup_logging(force=True)
+logger = get_logger(__name__)
 
 
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
@@ -61,10 +56,9 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         
         logger.info("Starting pipeline for dataset: %s", dataset_id)
         
-
         app_config = load_app_config()
         logger.info("Configuration loaded: verify_ssl=%s, s3_bucket=%s", app_config.verify_ssl, app_config.s3_bucket)
-        dataset_config = load_config(dataset_id)
+        dataset_config = load_dataset_config(dataset_id)
         
 
         run_result = run_pipeline(

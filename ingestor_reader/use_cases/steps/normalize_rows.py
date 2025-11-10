@@ -1,11 +1,11 @@
 """Normalize rows step."""
 import pandas as pd
-import logging
 
 from ingestor_reader.domain.entities.dataset_config import DatasetConfig
 from ingestor_reader.infra.plugins.registry import get_normalizer
+from ingestor_reader.infra.common import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def normalize_rows(

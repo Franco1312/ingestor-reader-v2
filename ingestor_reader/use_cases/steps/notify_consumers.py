@@ -1,12 +1,10 @@
 """Notify consumers step."""
-import hashlib
-import logging
-from datetime import datetime, timezone
 from typing import Optional
 
 from ingestor_reader.infra.event_bus.sns_publisher import SNSPublisher
+from ingestor_reader.infra.common import get_logger, get_clock, compute_string_hash
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def _is_fifo_topic(topic_arn: str) -> bool:
@@ -34,7 +32,7 @@ def _build_fifo_parameters(
         return None, None
     
     message_group_id = dataset_id
-    message_deduplication_id = hashlib.sha256(manifest_pointer.encode()).hexdigest()
+    message_deduplication_id = compute_string_hash(manifest_pointer)
     return message_group_id, message_deduplication_id
 
 
@@ -59,9 +57,10 @@ def notify_consumers(
     
     logger.info("Notifying consumers: %s manifest=%s", dataset_id, manifest_pointer)
     
+    clock = get_clock()
     event = {
         "type": "DATASET_UPDATED",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": clock.now_iso(),
         "dataset_id": dataset_id,
         "manifest_pointer": manifest_pointer,
     }

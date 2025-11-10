@@ -41,7 +41,6 @@ def test_explicit_parser_lookup():
     config = DatasetConfig(
         dataset_id="test",
         frequency="D",
-        lag_days=1,
         source=SourceConfig(kind="http", url="test", format="xlsx"),
         parse=ParseConfig(plugin="bcra_infomondia"),
         normalize=NormalizeConfig(plugin="bcra_infomondia", primary_keys=["obs_time", "internal_series_code"]),
@@ -59,7 +58,6 @@ def test_parser_requires_plugin_id():
     config = DatasetConfig(
         dataset_id="test",
         frequency="D",
-        lag_days=1,
         source=SourceConfig(kind="http", url="test", format="xlsx"),
         parse=ParseConfig(),
         normalize=NormalizeConfig(primary_keys=["key"]),
@@ -81,7 +79,6 @@ def test_custom_plugin_registration():
     config = DatasetConfig(
         dataset_id="test",
         frequency="D",
-        lag_days=1,
         source=SourceConfig(kind="http", url="test", format="xlsx"),
         parse=ParseConfig(plugin="test_parser"),
         normalize=NormalizeConfig(plugin="test_normalizer", primary_keys=["key"]),

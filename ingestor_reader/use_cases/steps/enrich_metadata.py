@@ -1,11 +1,11 @@
 """Enrich metadata step."""
 import pandas as pd
-import logging
-from datetime import datetime, timezone
 
 from ingestor_reader.domain.entities.dataset_config import DatasetConfig
+from ingestor_reader.infra.common import get_logger, get_clock
+from ingestor_reader.infra.common.series import resolve_series_code
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def _add_dataset_metadata(df: pd.DataFrame, config: DatasetConfig) -> None:
@@ -41,8 +41,9 @@ def _add_obs_date(df: pd.DataFrame) -> None:
 
 def _add_version_metadata(df: pd.DataFrame, version_ts: str) -> None:
     """Add version and vintage_date columns."""
+    clock = get_clock()
     df["version"] = version_ts
-    df["vintage_date"] = datetime.now(timezone.utc)
+    df["vintage_date"] = clock.now()
 
 
 def _add_quality_flag(df: pd.DataFrame) -> None:
@@ -101,6 +102,9 @@ def enrich_metadata(
     logger.info("Enriching %d rows with metadata", len(df))
     
     df = df.copy()
+    
+    # Resolve series_code (add if missing)
+    df = resolve_series_code(df, config)
     
     _add_dataset_metadata(df, config)
     _add_frequency_and_unit(df, config)

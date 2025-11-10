@@ -1,10 +1,10 @@
 """Compute delta step."""
 import pandas as pd
-import logging
 
 from ingestor_reader.domain.services.delta_service import compute_delta
+from ingestor_reader.infra.common import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def compute_delta_step(

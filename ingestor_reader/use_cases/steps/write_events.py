@@ -1,11 +1,11 @@
 """Write events step."""
 import pandas as pd
-import logging
 
 from ingestor_reader.infra.s3_catalog import S3Catalog
 from ingestor_reader.domain.entities.dataset_config import DatasetConfig
+from ingestor_reader.infra.common import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def write_events(

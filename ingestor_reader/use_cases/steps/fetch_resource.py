@@ -1,11 +1,11 @@
 """Fetch resource step."""
-import hashlib
 import os
 import requests
-import logging
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
+from ingestor_reader.infra.common import get_logger, compute_file_hash
+
+logger = get_logger(__name__)
 
 
 def _get_cert_path() -> str | None:
@@ -59,7 +59,4 @@ def fetch_resource(url: str, verify_ssl: bool = True) -> bytes:
     return response.content
 
 
-def compute_file_hash(content: bytes) -> str:
-    """Compute SHA256 hash of file content."""
-    return hashlib.sha256(content).hexdigest()
 

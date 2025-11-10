@@ -1,10 +1,10 @@
 """Consolidation service for projections."""
-import logging
 import pandas as pd
 
 from ingestor_reader.infra.s3_catalog import S3Catalog
+from ingestor_reader.infra.common import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def _read_events_for_month(

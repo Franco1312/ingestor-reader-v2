@@ -11,14 +11,13 @@ from ingestor_reader.domain.services.consolidation_service import (
     _read_events_for_month,
     _deduplicate_dataframe,
 )
-from ingestor_reader.use_cases.steps.consolidate_projection import (
-    consolidate_projection_step,
-    _extract_year_month,
-    _write_series_projections,
-    _get_affected_months,
-    _is_already_consolidated,
-    _consolidate_month,
+from ingestor_reader.use_cases.steps.consolidate_projection import consolidate_projection_step
+from ingestor_reader.use_cases.steps.consolidation import (
+    ConsolidationOrchestrator,
+    ConsolidationWriter,
+    ConsolidationManifest,
 )
+from ingestor_reader.infra.common import add_year_month_partitions
 from ingestor_reader.infra.s3_catalog import S3Catalog
 from ingestor_reader.infra.s3_storage import S3Storage
 from ingestor_reader.domain.entities.dataset_config import (
@@ -53,7 +52,6 @@ def dataset_config():
     return DatasetConfig(
         dataset_id="test_dataset",
         frequency="daily",
-        lag_days=0,
         source=SourceConfig(kind="http", url="http://example.com/data.xlsx", format="xlsx"),
         parse=ParseConfig(plugin="test_parser"),
         normalize=NormalizeConfig(plugin="test_normalizer", primary_keys=["obs_time", "internal_series_code"]),
@@ -109,7 +107,7 @@ def test_consolidate_month_projections_event_without_series_code(catalog, sample
     
     # Mock reading events
     catalog.s3.get_object = Mock(return_value=b"parquet-data")
-    catalog.parquet_io.read_from_bytes = Mock(return_value=data_without_series)
+    catalog._event_store.parquet_io.read_from_bytes = Mock(return_value=data_without_series)
     
     result = consolidate_month_projections(
         catalog, "test_dataset", 2024, 1, ["obs_time", "internal_series_code"]
@@ -142,7 +140,7 @@ def test_consolidate_month_projections_success(catalog, sample_data):
     
     # Mock reading events
     catalog.s3.get_object = Mock(return_value=b"parquet-data")
-    catalog.parquet_io.read_from_bytes = Mock(return_value=sample_data)
+    catalog._event_store.parquet_io.read_from_bytes = Mock(return_value=sample_data)
     
     result = consolidate_month_projections(
         catalog, "test_dataset", 2024, 1, ["obs_time", "internal_series_code"]
@@ -175,7 +173,7 @@ def test_consolidate_month_projections_with_duplicates(catalog):
     
     # Mock reading events
     catalog.s3.get_object = Mock(return_value=b"parquet-data")
-    catalog.parquet_io.read_from_bytes = Mock(return_value=data_with_duplicates)
+    catalog._event_store.parquet_io.read_from_bytes = Mock(return_value=data_with_duplicates)
     
     result = consolidate_month_projections(
         catalog, "test_dataset", 2024, 1, ["obs_time", "internal_series_code"]
@@ -253,7 +251,7 @@ def test_consolidate_projection_step_write_error(catalog, dataset_config, sample
     
     # Mock reading events
     catalog.s3.get_object = Mock(return_value=b"parquet-data")
-    catalog.parquet_io.read_from_bytes = Mock(return_value=sample_data)
+    catalog._event_store.parquet_io.read_from_bytes = Mock(return_value=sample_data)
     
     # Mock write_series_projection to raise exception
     catalog.write_series_projection = Mock(side_effect=Exception("Write error"))
@@ -271,14 +269,14 @@ def test_consolidate_projection_step_consolidation_error(catalog, dataset_config
     consolidate_projection_step(catalog, dataset_config, sample_data)
 
 
-def test_extract_year_month_invalid_dates(catalog):
+def test_add_year_month_partitions_invalid_dates(catalog):
     """Test extracting year/month with invalid dates."""
     df = pd.DataFrame({
         "obs_time": ["invalid", "2024-01-01", None],
         "value": [1.0, 2.0, 3.0],
     })
     
-    result = _extract_year_month(df, "obs_time")
+    result = add_year_month_partitions(df, "obs_time", drop_invalid=True)
     
     # Should filter out invalid dates
     assert len(result) == 1  # Only valid date remains
@@ -297,7 +295,8 @@ def test_write_series_projections_success(catalog, sample_data):
     catalog.write_series_projection_temp = Mock()
     catalog.move_series_projection_from_temp = Mock()
     
-    _write_series_projections(catalog, "test_dataset", 2024, 1, series_projections)
+    writer = ConsolidationWriter(catalog)
+    writer.write_series_projections("test_dataset", 2024, 1, series_projections)
     
     # Should write to temp and move for each series
     assert catalog.write_series_projection_temp.call_count == 2  # SERIES_1 and SERIES_2
@@ -315,8 +314,9 @@ def test_write_series_projections_temp_write_failure(catalog, sample_data):
     catalog.write_series_projection_temp = Mock(side_effect=Exception("Temp write error"))
     
     # Should raise exception
+    writer = ConsolidationWriter(catalog)
     with pytest.raises(Exception, match="Temp write error"):
-        _write_series_projections(catalog, "test_dataset", 2024, 1, series_projections)
+        writer.write_series_projections("test_dataset", 2024, 1, series_projections)
 
 
 def test_write_series_projections_move_failure(catalog, sample_data):
@@ -331,8 +331,9 @@ def test_write_series_projections_move_failure(catalog, sample_data):
     catalog.move_series_projection_from_temp = Mock(side_effect=Exception("Move error"))
     
     # Should raise exception
+    writer = ConsolidationWriter(catalog)
     with pytest.raises(Exception, match="Move error"):
-        _write_series_projections(catalog, "test_dataset", 2024, 1, series_projections)
+        writer.write_series_projections("test_dataset", 2024, 1, series_projections)
 
 
 def test_consolidate_month_projections_multiple_events(catalog):
@@ -363,7 +364,7 @@ def test_consolidate_month_projections_multiple_events(catalog):
         return event2_data
     
     catalog.s3.get_object = Mock(return_value=b"parquet-data")
-    catalog.parquet_io.read_from_bytes = Mock(side_effect=mock_read)
+    catalog._event_store.parquet_io.read_from_bytes = Mock(side_effect=mock_read)
     
     result = consolidate_month_projections(
         catalog, "test_dataset", 2024, 1, ["obs_time", "internal_series_code"]
@@ -394,7 +395,7 @@ def test_consolidate_month_projections_mixed_valid_invalid_events(catalog, sampl
             return sample_data
     
     catalog.s3.get_object = Mock(return_value=b"parquet-data")
-    catalog.parquet_io.read_from_bytes = Mock(side_effect=mock_read)
+    catalog._event_store.parquet_io.read_from_bytes = Mock(side_effect=mock_read)
     
     result = consolidate_month_projections(
         catalog, "test_dataset", 2024, 1, ["obs_time", "internal_series_code"]
@@ -414,7 +415,8 @@ def test_get_affected_months(catalog):
         "value": [1.0, 2.0, 3.0],
     })
     
-    result = _get_affected_months(df)
+    orchestrator = ConsolidationOrchestrator(catalog)
+    result = orchestrator._get_affected_months(df)
     
     assert len(result) == 3
     assert (2024, 1) in result
@@ -430,7 +432,8 @@ def test_get_affected_months_deduplicates(catalog):
         "value": [1.0, 2.0, 3.0],
     })
     
-    result = _get_affected_months(df)
+    orchestrator = ConsolidationOrchestrator(catalog)
+    result = orchestrator._get_affected_months(df)
     
     assert len(result) == 1
     assert (2024, 1) in result
@@ -441,7 +444,8 @@ def test_is_already_consolidated_true(catalog):
     # Mock manifest with completed status
     catalog.read_consolidation_manifest = Mock(return_value={"status": "completed"})
     
-    result = _is_already_consolidated(catalog, "test_dataset", 2024, 1)
+    manifest = ConsolidationManifest(catalog)
+    result = manifest.is_already_consolidated("test_dataset", 2024, 1)
     
     assert result is True
     catalog.read_consolidation_manifest.assert_called_once_with("test_dataset", 2024, 1)
@@ -452,7 +456,8 @@ def test_is_already_consolidated_false_no_manifest(catalog):
     # Mock manifest not found
     catalog.read_consolidation_manifest = Mock(return_value=None)
     
-    result = _is_already_consolidated(catalog, "test_dataset", 2024, 1)
+    manifest = ConsolidationManifest(catalog)
+    result = manifest.is_already_consolidated("test_dataset", 2024, 1)
     
     assert result is False
 
@@ -462,7 +467,8 @@ def test_is_already_consolidated_false_in_progress(catalog):
     # Mock manifest with in_progress status
     catalog.read_consolidation_manifest = Mock(return_value={"status": "in_progress"})
     
-    result = _is_already_consolidated(catalog, "test_dataset", 2024, 1)
+    manifest = ConsolidationManifest(catalog)
+    result = manifest.is_already_consolidated("test_dataset", 2024, 1)
     
     assert result is False
 
@@ -477,7 +483,8 @@ def test_consolidate_month_idempotency(catalog, dataset_config, sample_data):
     catalog.write_consolidation_manifest = Mock()
     catalog.list_events_for_month = Mock()
     
-    _consolidate_month(catalog, dataset_config, 2024, 1, ["obs_time", "internal_series_code"])
+    orchestrator = ConsolidationOrchestrator(catalog)
+    orchestrator._consolidate_month(dataset_config, 2024, 1, ["obs_time", "internal_series_code"])
     
     # Should skip consolidation
     catalog.cleanup_temp_projections.assert_not_called()
@@ -495,7 +502,8 @@ def test_consolidate_month_cleanup_temp_on_start(catalog, dataset_config, sample
     # Mock consolidation to return empty (early return)
     catalog.list_events_for_month = Mock(return_value=[])
     
-    _consolidate_month(catalog, dataset_config, 2024, 1, ["obs_time", "internal_series_code"])
+    orchestrator = ConsolidationOrchestrator(catalog)
+    orchestrator._consolidate_month(dataset_config, 2024, 1, ["obs_time", "internal_series_code"])
     
     # Should cleanup temp files
     catalog.cleanup_temp_projections.assert_called_once_with("test_dataset", 2024, 1)
@@ -511,8 +519,9 @@ def test_consolidate_month_cleanup_temp_on_error(catalog, dataset_config, sample
     # Mock consolidation to raise error
     catalog.list_events_for_month = Mock(side_effect=Exception("Consolidation error"))
     
+    orchestrator = ConsolidationOrchestrator(catalog)
     with pytest.raises(Exception, match="Consolidation error"):
-        _consolidate_month(catalog, dataset_config, 2024, 1, ["obs_time", "internal_series_code"])
+        orchestrator._consolidate_month(dataset_config, 2024, 1, ["obs_time", "internal_series_code"])
     
     # Should cleanup temp files twice (on start and on error)
     assert catalog.cleanup_temp_projections.call_count == 2
@@ -528,11 +537,12 @@ def test_consolidate_month_manifest_lifecycle(catalog, dataset_config, sample_da
     # Mock successful consolidation
     catalog.list_events_for_month = Mock(return_value=["event1.parquet"])
     catalog.s3.get_object = Mock(return_value=b"parquet-data")
-    catalog.parquet_io.read_from_bytes = Mock(return_value=sample_data)
+    catalog._event_store.parquet_io.read_from_bytes = Mock(return_value=sample_data)
     catalog.write_series_projection_temp = Mock()
     catalog.move_series_projection_from_temp = Mock()
     
-    _consolidate_month(catalog, dataset_config, 2024, 1, ["obs_time", "internal_series_code"])
+    orchestrator = ConsolidationOrchestrator(catalog)
+    orchestrator._consolidate_month(dataset_config, 2024, 1, ["obs_time", "internal_series_code"])
     
     # Should write manifest twice: in_progress and completed
     assert catalog.write_consolidation_manifest.call_count == 2
@@ -550,7 +560,8 @@ def test_consolidate_month_no_series_projections(catalog, dataset_config):
     # Mock consolidation to return empty dict
     catalog.list_events_for_month = Mock(return_value=[])
     
-    _consolidate_month(catalog, dataset_config, 2024, 1, ["obs_time", "internal_series_code"])
+    orchestrator = ConsolidationOrchestrator(catalog)
+    orchestrator._consolidate_month(dataset_config, 2024, 1, ["obs_time", "internal_series_code"])
     
     # Should mark as in_progress but not completed (early return)
     catalog.write_consolidation_manifest.assert_called_once_with("test_dataset", 2024, 1, status="in_progress")
@@ -566,17 +577,17 @@ def test_read_consolidation_manifest_success(catalog):
         "timestamp": "2024-01-01T00:00:00Z"
     }
     
-    catalog._read_json = Mock(return_value=manifest_data)
+    catalog._projection_store._read_json = Mock(return_value=manifest_data)
     
     result = catalog.read_consolidation_manifest("test_dataset", 2024, 1)
     
     assert result == manifest_data
-    catalog._read_json.assert_called_once()
+    catalog._projection_store._read_json.assert_called_once()
 
 
 def test_read_consolidation_manifest_not_found(catalog):
     """Test reading consolidation manifest when not found."""
-    catalog._read_json = Mock(return_value=None)
+    catalog._projection_store._read_json = Mock(return_value=None)
     
     result = catalog.read_consolidation_manifest("test_dataset", 2024, 1)
     
@@ -592,7 +603,8 @@ def test_write_consolidation_manifest(catalog):
     # Should write manifest
     assert catalog.s3.put_object.called
     call_args = catalog.s3.put_object.call_args
-    assert call_args[0][0] == "datasets-test/test_dataset/projections/consolidation/2024/01/manifest.json"
+    expected_key = catalog.paths.consolidation_manifest_key("test_dataset", 2024, 1)
+    assert call_args[0][0] == expected_key
     assert call_args[1]["content_type"] == "application/json"
 
 
@@ -600,9 +612,9 @@ def test_cleanup_temp_projections(catalog):
     """Test cleaning up temporary projections."""
     # Mock list_objects to return temp keys
     catalog.s3.list_objects = Mock(return_value=[
-        "datasets-test/test_dataset/projections/windows/SERIES_1/year=2024/month=01/.tmp/data.parquet",
-        "datasets-test/test_dataset/projections/windows/SERIES_1/year=2024/month=01/data.parquet",
-        "datasets-test/test_dataset/projections/windows/SERIES_2/year=2024/month=01/.tmp/data.parquet",
+        "datasets/test_dataset/projections/windows/SERIES_1/year=2024/month=01/.tmp/data.parquet",
+        "datasets/test_dataset/projections/windows/SERIES_1/year=2024/month=01/data.parquet",
+        "datasets/test_dataset/projections/windows/SERIES_2/year=2024/month=01/.tmp/data.parquet",
     ])
     
     catalog.s3.s3_client.delete_object = Mock()

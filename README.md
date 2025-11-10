@@ -102,12 +102,16 @@ Para una descripción detallada de la estructura de datos en S3, ver [docs/S3_ST
 s3://<bucket>/datasets/<dataset_id>/
   configs/config.yaml              # Dataset config (optional, can use local)
   index/keys.parquet               # Primary key index
-  events/<version_ts>/             # Event Store (Event Sourcing)
-    manifest.json                  # Event manifest
-    data/year=YYYY/month=MM/part-*.parquet  # Immutable events
+  events/                          # Event Store (Event Sourcing)
+    index/YYYY/MM/versions.json   # Event index by month (optimization)
+    <version_ts>/
+      manifest.json                # Event manifest
+      data/year=YYYY/month=MM/part-*.parquet  # Immutable events
   projections/                     # Read Models (CQRS)
     windows/<series_code>/         # Series projections
       year=YYYY/month=MM/data.parquet  # Consolidated projections
+    consolidation/YYYY/MM/        # Consolidation manifests
+      manifest.json                # Consolidation status
   current/
     manifest.json                  # Pointer to current version (CAS)
 ```
@@ -161,10 +165,12 @@ This ensures that:
 
 ## Documentation
 
+- **[Pipeline Flow Diagrams](docs/PIPELINE_FLOW_DIAGRAM.md)**: Complete pipeline flow with all scenarios, sequence diagrams, and resilience mechanisms
 - [S3 Structure](docs/S3_STRUCTURE.md): Complete S3 folder structure
 - [Storage Flow](docs/S3_STORAGE_FLOW.md): What, how, and when data is saved
-- [Flow Sequence](docs/FLOW_SEQUENCE.md): Step-by-step pipeline sequence
+- [Resilience Implementation](docs/RESILIENCE_IMPLEMENTATION.md): Detailed resilience implementations (rollback, consistency checks)
 - [Locks](docs/LOCKS.md): Distributed locking mechanism
+- [Consolidation Resilience](docs/CONSOLIDATION_RESILIENCE.md): WAL pattern and consolidation manifests
 
 ## Testing
 

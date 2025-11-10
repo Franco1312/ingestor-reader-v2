@@ -67,7 +67,6 @@ def dataset_config():
     return DatasetConfig(
         dataset_id="test_dataset",
         frequency="daily",
-        lag_days=0,
         source=SourceConfig(
             kind="http",
             url="http://example.com/data.xlsx",

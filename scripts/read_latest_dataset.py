@@ -7,8 +7,7 @@ from pathlib import Path
 # Agregar el directorio raíz al path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from ingestor_reader.infra.configs.app_config_loader import load_app_config
-from ingestor_reader.infra.configs.env_loader import load_env_file
+from ingestor_reader.infra.common import load_app_config
 from ingestor_reader.infra.s3_storage import S3Storage
 from ingestor_reader.infra.s3_catalog import S3Catalog
 from ingestor_reader.infra.parquet_io import ParquetIO
@@ -34,7 +33,6 @@ def read_latest_dataset(
         DataFrame con datos consolidados de la proyección
     """
     # Cargar configuración
-    load_env_file()
     app_config = load_app_config()
     
     # Inicializar S3

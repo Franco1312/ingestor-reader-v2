@@ -1,12 +1,11 @@
 """DynamoDB lock implementation."""
-import logging
 from typing import Optional
-from datetime import datetime, timezone, timedelta
 
 import boto3
 from botocore.exceptions import ClientError
+from ingestor_reader.infra.common import get_logger, get_clock
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class DynamoDBLock:
@@ -43,7 +42,8 @@ class DynamoDBLock:
             True if lock acquired, False if already locked
         """
         try:
-            now = int(datetime.now(timezone.utc).timestamp())
+            clock = get_clock()
+            now = int(clock.now().timestamp())
             expires_at = now + self.ttl_seconds
             
 
@@ -115,7 +115,8 @@ class DynamoDBLock:
             
             item = response["Item"]
             expires_at = item.get("expires_at", 0)
-            now = int(datetime.now(timezone.utc).timestamp())
+            clock = get_clock()
+            now = int(clock.now().timestamp())
             
 
             if expires_at < now:

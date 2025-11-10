@@ -96,4 +96,8 @@ class S3Storage:
             if "Contents" in page:
                 keys.extend([obj["Key"] for obj in page["Contents"]])
         return keys
+    
+    def delete_object(self, key: str) -> None:
+        """Delete object from S3."""
+        self.s3_client.delete_object(Bucket=self.bucket, Key=key)
 

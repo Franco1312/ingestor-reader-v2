@@ -1,427 +1,152 @@
-"""S3 catalog path management and operations."""
-import json
-from typing import Optional
-import pandas as pd
-from botocore.exceptions import ClientError
-
-from ingestor_reader.domain.entities.manifest import Manifest
+"""S3 catalog facade that composes specialized stores."""
 from ingestor_reader.infra.s3_storage import S3Storage
-from ingestor_reader.infra.parquet_io import ParquetIO
+from ingestor_reader.infra.s3_stores import (
+    S3ManifestStore,
+    S3IndexStore,
+    S3EventStore,
+    S3ProjectionStore,
+)
 
 
 class S3Catalog:
-    """S3 catalog operations."""
+    """
+    S3 catalog facade that composes specialized stores.
+    
+    This class provides a unified interface to all S3 operations while
+    delegating to specialized stores for better organization and maintainability.
+    """
     
     def __init__(self, s3_storage: S3Storage):
-        """
-        Initialize S3 catalog.
-        
-        Args:
-            s3_storage: S3 storage instance
-        """
+        """Initialize S3 catalog with specialized stores."""
         self.s3 = s3_storage
-        self.parquet_io = ParquetIO()
+        self._manifest_store = S3ManifestStore(s3_storage)
+        self._index_store = S3IndexStore(s3_storage)
+        self._event_store = S3EventStore(s3_storage)
+        self._projection_store = S3ProjectionStore(s3_storage)
     
-    @staticmethod
-    def _is_not_found_error(error: ClientError) -> bool:
-        """
-        Check if ClientError is a 404/NoSuchKey error.
-        
-        Args:
-            error: ClientError exception
-            
-        Returns:
-            True if error is 404/NoSuchKey, False otherwise
-        """
-        error_code = error.response.get("Error", {}).get("Code", "")
-        return error_code in ("404", "NoSuchKey")
+    # ============================================================================
+    # Manifest Operations (delegated to S3ManifestStore)
+    # ============================================================================
     
-    def _read_json(self, key: str) -> Optional[dict]:
-        """
-        Read JSON object from S3 with error handling.
-        
-        Args:
-            key: S3 key
-            
-        Returns:
-            Dict or None if not found
-        """
-        try:
-            body = self.s3.get_object(key)
-            return json.loads(body.decode())
-        except ClientError as e:
-            if self._is_not_found_error(e):
-                return None
-            raise
-        except json.JSONDecodeError:
-            return None
-    
-    def _read_parquet(self, key: str) -> Optional[pd.DataFrame]:
-        """
-        Read Parquet object from S3 with error handling.
-        
-        Args:
-            key: S3 key
-            
-        Returns:
-            DataFrame or None if not found
-        """
-        try:
-            body = self.s3.get_object(key)
-            return self.parquet_io.read_from_bytes(body)
-        except ClientError as e:
-            if self._is_not_found_error(e):
-                return None
-            raise
-    
-    def _config_key(self, dataset_id: str) -> str:
-        """Get config key."""
-        return f"datasets-test/{dataset_id}/configs/config.yaml"
-    
-    def _index_key(self, dataset_id: str) -> str:
-        """Get index key."""
-        return f"datasets-test/{dataset_id}/index/keys.parquet"
-    
-    def _current_manifest_key(self, dataset_id: str) -> str:
-        """Get current manifest pointer key."""
-        return f"datasets-test/{dataset_id}/current/manifest.json"
-    
-    def _events_prefix(self, dataset_id: str, version_ts: str) -> str:
-        """Get events prefix."""
-        return f"datasets-test/{dataset_id}/events/{version_ts}/data/"
-    
-    def _event_manifest_key(self, dataset_id: str, version_ts: str) -> str:
-        """Get event manifest key."""
-        return f"datasets-test/{dataset_id}/events/{version_ts}/manifest.json"
-    
-    def _projection_series_key(self, dataset_id: str, series_code: str, year: int, month: int) -> str:
-        """Get projection series key."""
-        return f"datasets-test/{dataset_id}/projections/windows/{series_code}/year={year}/month={month:02d}/data.parquet"
-    
-    def _projection_series_temp_key(self, dataset_id: str, series_code: str, year: int, month: int) -> str:
-        """Get projection series temporary key (WAL)."""
-        return f"datasets-test/{dataset_id}/projections/windows/{series_code}/year={year}/month={month:02d}/.tmp/data.parquet"
-    
-    def _consolidation_manifest_key(self, dataset_id: str, year: int, month: int) -> str:
-        """Get consolidation manifest key."""
-        return f"datasets-test/{dataset_id}/projections/consolidation/{year}/{month:02d}/manifest.json"
-    
-    def get_current_manifest_etag(self, dataset_id: str) -> Optional[str]:
+    def get_current_manifest_etag(self, dataset_id: str):
         """Get ETag of current manifest."""
-        key = self._current_manifest_key(dataset_id)
-        metadata = self.s3.head_object(key)
-        return metadata["ETag"] if metadata else None
+        return self._manifest_store.get_current_manifest_etag(dataset_id)
     
-    def read_current_manifest(self, dataset_id: str) -> Optional[dict]:
+    def read_current_manifest(self, dataset_id: str):
         """Read current manifest pointer."""
-        key = self._current_manifest_key(dataset_id)
-        return self._read_json(key)
+        return self._manifest_store.read_current_manifest(dataset_id)
     
-    def put_current_manifest_pointer(
-        self, dataset_id: str, body: dict, if_match_etag: Optional[str]
-    ) -> str:
-        """
-        Update current manifest pointer with CAS.
-        
-        Args:
-            dataset_id: Dataset ID
-            body: Manifest pointer body
-            if_match_etag: ETag for conditional PUT
-            
-        Returns:
-            New ETag
-            
-        Raises:
-            ValueError: If conditional check fails
-        """
-        key = self._current_manifest_key(dataset_id)
-        body_bytes = json.dumps(body, indent=2).encode()
-        try:
-            return self.s3.put_object(
-                key, body_bytes, content_type="application/json", if_match=if_match_etag
-            )
-        except ClientError as e:
-            error_code = e.response.get("Error", {}).get("Code", "")
-            if error_code == "412":
-                raise ValueError("Conditional PUT failed: ETag mismatch") from e
-            raise
+    def put_current_manifest_pointer(self, dataset_id: str, body: dict, if_match_etag):
+        """Update current manifest pointer with CAS."""
+        return self._manifest_store.put_current_manifest_pointer(dataset_id, body, if_match_etag)
     
-    def write_event_manifest(self, dataset_id: str, version_ts: str, manifest: Manifest) -> None:
+    def write_event_manifest(self, dataset_id: str, version_ts: str, manifest):
         """Write event manifest."""
-        key = self._event_manifest_key(dataset_id, version_ts)
-        body = manifest.model_dump_json(indent=2)
-        self.s3.put_object(key, body.encode(), content_type="application/json")
+        return self._manifest_store.write_event_manifest(dataset_id, version_ts, manifest)
     
-    def read_event_manifest(self, dataset_id: str, version_ts: str) -> Optional[dict]:
-        """
-        Read event manifest.
-        
-        Args:
-            dataset_id: Dataset ID
-            version_ts: Version timestamp
-            
-        Returns:
-            Manifest dict or None if not found
-        """
-        key = self._event_manifest_key(dataset_id, version_ts)
-        return self._read_json(key)
+    def read_event_manifest(self, dataset_id: str, version_ts: str):
+        """Read event manifest."""
+        return self._manifest_store.read_event_manifest(dataset_id, version_ts)
     
     def get_event_manifest_pointer(self, dataset_id: str, version_ts: str) -> str:
-        """
-        Get manifest pointer path for an event.
-        
-        Returns the relative path within the bucket (without the "datasets/" prefix)
-        for use in SNS notifications.
-        
-        Args:
-            dataset_id: Dataset ID
-            version_ts: Version timestamp
-            
-        Returns:
-            Manifest pointer path (relative path within bucket, without "datasets/" prefix)
-        """
-        return f"{dataset_id}/events/{version_ts}/manifest.json"
+        """Get manifest pointer path for an event (for SNS notifications)."""
+        return self._manifest_store.get_event_manifest_pointer(dataset_id, version_ts)
     
-    def read_index(self, dataset_id: str) -> Optional[pd.DataFrame]:
+    # ============================================================================
+    # Index Operations (delegated to S3IndexStore)
+    # ============================================================================
+    
+    def read_index(self, dataset_id: str):
         """Read index DataFrame."""
-        key = self._index_key(dataset_id)
-        return self._read_parquet(key)
+        return self._index_store.read_index(dataset_id)
     
-    def write_index(self, dataset_id: str, df: pd.DataFrame) -> None:
+    def write_index(self, dataset_id: str, df):
         """Write index DataFrame."""
-        key = self._index_key(dataset_id)
-        body = self.parquet_io.write_to_bytes(df)
-        self.s3.put_object(key, body, content_type="application/x-parquet")
+        return self._index_store.write_index(dataset_id, df)
     
-    def _find_date_column(self, df: pd.DataFrame) -> Optional[str]:
-        """
-        Find date column in DataFrame (obs_time or obs_date).
-        
-        Args:
-            df: DataFrame to search
-            
-        Returns:
-            Column name or None if not found
-        """
-        if "obs_time" in df.columns:
-            return "obs_time"
-        if "obs_date" in df.columns:
-            return "obs_date"
-        return None
+    def verify_pointer_index_consistency(self, dataset_id: str) -> bool:
+        """Verify consistency between pointer and index."""
+        return self._index_store.verify_pointer_index_consistency(dataset_id, self._manifest_store)
     
-    def _add_year_month_partitions(self, df: pd.DataFrame, date_col: str) -> pd.DataFrame:
-        """
-        Add year and month columns for partitioning.
-        
-        Args:
-            df: DataFrame with date column
-            date_col: Name of date column
-            
-        Returns:
-            DataFrame with year and month columns added
-        """
-        df_with_partitions = df.copy()
-        df_with_partitions["year"] = pd.to_datetime(df[date_col]).dt.year
-        df_with_partitions["month"] = pd.to_datetime(df[date_col]).dt.month
-        return df_with_partitions
+    def rebuild_index_from_pointer(self, dataset_id: str) -> None:
+        """Rebuild index from pointer by reading all events up to current version."""
+        return self._index_store.rebuild_index_from_pointer(dataset_id, self._manifest_store, self._event_store)
     
-    def write_events(
-        self, dataset_id: str, version_ts: str, df: pd.DataFrame
-    ) -> list[str]:
-        """
-        Write event parquet files partitioned by year/month.
-        
-        Partitions data by year/month based on obs_time or obs_date column.
-        Uses Hive-style partitioning: year=YYYY/month=MM/part-*.parquet
-        
-        Returns:
-            List of written file keys
-        """
-        if len(df) == 0:
-            return []
-        
-        prefix = self._events_prefix(dataset_id, version_ts)
-        date_col = self._find_date_column(df)
-        
-        if date_col is None:
-            key = f"{prefix}part-0.parquet"
-            body = self.parquet_io.write_to_bytes(df)
-            self.s3.put_object(key, body, content_type="application/x-parquet")
-            return [key]
-        
-        df_with_partitions = self._add_year_month_partitions(df, date_col)
-        event_keys = []
-        
-        for (year, month), group_df in df_with_partitions.groupby(["year", "month"]):
-            group_df_clean = group_df.drop(columns=["year", "month"])
-            partition_path = f"year={year}/month={month:02d}/"
-            key = f"{prefix}{partition_path}part-0.parquet"
-            
-            body = self.parquet_io.write_to_bytes(group_df_clean)
-            self.s3.put_object(key, body, content_type="application/x-parquet")
-            event_keys.append(key)
-        
-        return event_keys
+    # ============================================================================
+    # Event Operations (delegated to S3EventStore)
+    # ============================================================================
+    
+    def write_events(self, dataset_id: str, version_ts: str, df):
+        """Write event parquet files partitioned by year/month."""
+        return self._event_store.write_events(dataset_id, version_ts, df)
     
     def list_events_for_month(self, dataset_id: str, year: int, month: int) -> list[str]:
-        """
-        List all event keys for a specific month.
-        
-        Args:
-            dataset_id: Dataset ID
-            year: Year
-            month: Month (1-12)
-            
-        Returns:
-            List of event keys for the month
-        """
-        prefix = f"datasets-test/{dataset_id}/events/"
-        
-        all_keys = self.s3.list_objects(prefix)
-        matching_keys = [
-            key for key in all_keys
-            if f"year={year}/month={month:02d}/part-0.parquet" in key
-        ]
-        
-        return sorted(matching_keys)
+        """List all event keys for a specific month using event index."""
+        return self._event_store.list_events_for_month(dataset_id, year, month)
     
-    def read_series_projection(
-        self, dataset_id: str, series_code: str, year: int, month: int
-    ) -> Optional[pd.DataFrame]:
-        """
-        Read series projection.
-        
-        Args:
-            dataset_id: Dataset ID
-            series_code: Series code
-            year: Year
-            month: Month (1-12)
-            
-        Returns:
-            DataFrame or None if not found
-        """
-        key = self._projection_series_key(dataset_id, series_code, year, month)
-        return self._read_parquet(key)
+    def read_event_index(self, dataset_id: str, year: int, month: int):
+        """Read event index for a month."""
+        return self._event_store.read_event_index(dataset_id, year, month)
     
-    def write_series_projection(
-        self, dataset_id: str, series_code: str, year: int, month: int, df: pd.DataFrame
-    ) -> None:
-        """
-        Write series projection.
-        
-        Args:
-            dataset_id: Dataset ID
-            series_code: Series code
-            year: Year
-            month: Month (1-12)
-            df: DataFrame to write
-        """
-        key = self._projection_series_key(dataset_id, series_code, year, month)
-        body = self.parquet_io.write_to_bytes(df)
-        self.s3.put_object(key, body, content_type="application/x-parquet")
+    def write_event_index(self, dataset_id: str, year: int, month: int, versions: list[str]) -> None:
+        """Write event index for a month."""
+        return self._event_store.write_event_index(dataset_id, year, month, versions)
     
-    def write_series_projection_temp(
-        self, dataset_id: str, series_code: str, year: int, month: int, df: pd.DataFrame
-    ) -> None:
-        """
-        Write series projection to temporary location (WAL).
-        
-        Args:
-            dataset_id: Dataset ID
-            series_code: Series code
-            year: Year
-            month: Month (1-12)
-            df: DataFrame to write
-        """
-        key = self._projection_series_temp_key(dataset_id, series_code, year, month)
-        body = self.parquet_io.write_to_bytes(df)
-        self.s3.put_object(key, body, content_type="application/x-parquet")
+    # Expose internal methods for testing (backward compatibility)
+    def _update_event_index(self, dataset_id: str, year: int, month: int, version_ts: str) -> None:
+        """Update event index for a month (internal, exposed for testing)."""
+        return self._event_store._update_event_index(dataset_id, year, month, version_ts)
     
-    def move_series_projection_from_temp(
-        self, dataset_id: str, series_code: str, year: int, month: int
-    ) -> None:
-        """
-        Move series projection from temporary to final location (atomic).
-        
-        Args:
-            dataset_id: Dataset ID
-            series_code: Series code
-            year: Year
-            month: Month (1-12)
-        """
-        temp_key = self._projection_series_temp_key(dataset_id, series_code, year, month)
-        final_key = self._projection_series_key(dataset_id, series_code, year, month)
-        
-        # Copy from temp to final
-        body = self.s3.get_object(temp_key)
-        self.s3.put_object(final_key, body, content_type="application/x-parquet")
-        
-        # Delete temp
-        try:
-            self.s3.s3_client.delete_object(Bucket=self.s3.bucket, Key=temp_key)
-        except (ClientError, Exception):
-            pass  # Ignore if temp doesn't exist or any error
+    def _write_event_files(self, prefix: str, df_with_partitions, affected_months: set, event_keys: list[str]) -> None:
+        """Write event files for each partition (internal, exposed for testing)."""
+        return self._event_store._write_event_files(prefix, df_with_partitions, affected_months, event_keys)
+    
+    def _rollback_events(self, event_keys: list[str]) -> None:
+        """Delete all written events on rollback (internal, exposed for testing)."""
+        return self._event_store._rollback_events(event_keys)
+    
+    # ============================================================================
+    # Projection Operations (delegated to S3ProjectionStore)
+    # ============================================================================
+    
+    def read_series_projection(self, dataset_id: str, series_code: str, year: int, month: int):
+        """Read series projection."""
+        return self._projection_store.read_series_projection(dataset_id, series_code, year, month)
+    
+    def write_series_projection(self, dataset_id: str, series_code: str, year: int, month: int, df):
+        """Write series projection."""
+        return self._projection_store.write_series_projection(dataset_id, series_code, year, month, df)
+    
+    def write_series_projection_temp(self, dataset_id: str, series_code: str, year: int, month: int, df):
+        """Write series projection to temporary location (WAL)."""
+        return self._projection_store.write_series_projection_temp(dataset_id, series_code, year, month, df)
+    
+    def move_series_projection_from_temp(self, dataset_id: str, series_code: str, year: int, month: int):
+        """Move series projection from temporary to final location (atomic)."""
+        return self._projection_store.move_series_projection_from_temp(dataset_id, series_code, year, month)
     
     def cleanup_temp_projections(self, dataset_id: str, year: int, month: int) -> None:
-        """
-        Clean up temporary projections for a month.
-        
-        Args:
-            dataset_id: Dataset ID
-            year: Year
-            month: Month (1-12)
-        """
-        prefix = f"datasets-test/{dataset_id}/projections/windows/"
-        all_keys = self.s3.list_objects(prefix)
-        temp_keys = [
-            key for key in all_keys
-            if f"year={year}/month={month:02d}/.tmp/" in key
-        ]
-        
-        for key in temp_keys:
-            try:
-                self.s3.s3_client.delete_object(Bucket=self.s3.bucket, Key=key)
-            except ClientError:
-                pass
+        """Clean up temporary projections for a month."""
+        return self._projection_store.cleanup_temp_projections(dataset_id, year, month)
     
-    def read_consolidation_manifest(self, dataset_id: str, year: int, month: int) -> Optional[dict]:
-        """
-        Read consolidation manifest.
-        
-        Args:
-            dataset_id: Dataset ID
-            year: Year
-            month: Month (1-12)
-            
-        Returns:
-            Manifest dict or None if not found
-        """
-        key = self._consolidation_manifest_key(dataset_id, year, month)
-        return self._read_json(key)
+    def read_consolidation_manifest(self, dataset_id: str, year: int, month: int):
+        """Read consolidation manifest."""
+        return self._projection_store.read_consolidation_manifest(dataset_id, year, month)
     
-    def write_consolidation_manifest(
-        self, dataset_id: str, year: int, month: int, status: str
-    ) -> None:
-        """
-        Write consolidation manifest.
-        
-        Args:
-            dataset_id: Dataset ID
-            year: Year
-            month: Month (1-12)
-            status: Status ("in_progress" or "completed")
-        """
-        from datetime import datetime, timezone
-        
-        key = self._consolidation_manifest_key(dataset_id, year, month)
-        manifest = {
-            "dataset_id": dataset_id,
-            "year": year,
-            "month": month,
-            "status": status,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-        body = json.dumps(manifest, indent=2).encode()
-        self.s3.put_object(key, body, content_type="application/json")
+    def write_consolidation_manifest(self, dataset_id: str, year: int, month: int, status: str) -> None:
+        """Write consolidation manifest."""
+        return self._projection_store.write_consolidation_manifest(dataset_id, year, month, status)
     
-
+    # ============================================================================
+    # Compatibility: Expose stores for direct access if needed
+    # ============================================================================
+    
+    @property
+    def parquet_io(self):
+        """Expose parquet_io for backward compatibility."""
+        return self._event_store.parquet_io
+    
+    @property
+    def paths(self):
+        """Expose paths for backward compatibility."""
+        return self._event_store.paths

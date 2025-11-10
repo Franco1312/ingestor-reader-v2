@@ -12,9 +12,14 @@ from ingestor_reader.infra.locks.dynamodb_lock import DynamoDBLock
 
 
 @pytest.fixture
-def dynamodb_table():
-    """Create a DynamoDB table for testing."""
+def aws_resources():
+    """Create AWS resources (S3 bucket and DynamoDB table) for testing."""
     with mock_aws():
+        # Create S3 bucket
+        s3_client = boto3.client("s3", region_name="us-east-1")
+        s3_client.create_bucket(Bucket="test-bucket")
+        
+        # Create DynamoDB table
         dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
         table = dynamodb.create_table(
             TableName="test-locks",
@@ -22,11 +27,11 @@ def dynamodb_table():
             AttributeDefinitions=[{"AttributeName": "lock_key", "AttributeType": "S"}],
             BillingMode="PAY_PER_REQUEST",
         )
-        yield table
+        yield {"s3_client": s3_client, "dynamodb_table": table}
 
 
 @pytest.fixture
-def app_config_with_lock(dynamodb_table):
+def app_config_with_lock(aws_resources):
     """Create AppConfig with lock table configured."""
     return AppConfig(
         s3_bucket="test-bucket",
@@ -36,7 +41,7 @@ def app_config_with_lock(dynamodb_table):
 
 
 @pytest.fixture
-def app_config_without_lock():
+def app_config_without_lock(aws_resources):
     """Create AppConfig without lock table configured."""
     return AppConfig(
         s3_bucket="test-bucket",
@@ -57,7 +62,6 @@ def dataset_config():
     return DatasetConfig(
         dataset_id="test_dataset",
         frequency="daily",
-        lag_days=0,
         source=SourceConfig(kind="http", url="http://example.com/data.xlsx", format="xlsx"),
         parse=ParseConfig(plugin="test_parser"),
         normalize=NormalizeConfig(plugin="test_normalizer", primary_keys=["key"]),
@@ -90,7 +94,7 @@ def test_pipeline_with_lock_acquires_and_releases(
     mock_fetch,
     app_config_with_lock,
     dataset_config,
-    dynamodb_table,
+    aws_resources,
 ):
     """Test that pipeline acquires and releases lock correctly."""
     # Setup mocks with proper DataFrame returns
@@ -122,7 +126,7 @@ def test_pipeline_with_lock_already_acquired_skips(
     mock_fetch,
     app_config_with_lock,
     dataset_config,
-    dynamodb_table,
+    aws_resources,
 ):
     """Test that pipeline skips execution if lock is already acquired."""
     # Acquire lock manually
@@ -150,6 +154,7 @@ def test_pipeline_without_lock_executes(
     mock_fetch,
     app_config_without_lock,
     dataset_config,
+    aws_resources,
 ):
     """Test that pipeline executes without lock if not configured."""
     # Setup mocks
@@ -171,7 +176,7 @@ def test_pipeline_releases_lock_on_error(
     mock_fetch,
     app_config_with_lock,
     dataset_config,
-    dynamodb_table,
+    aws_resources,
 ):
     """Test that pipeline releases lock even if an error occurs."""
     # Setup mocks to raise an error
@@ -209,7 +214,7 @@ def test_pipeline_concurrent_execution_second_skips(
     mock_fetch,
     app_config_with_lock,
     dataset_config,
-    dynamodb_table,
+    aws_resources,
 ):
     """Test that concurrent pipeline executions are prevented."""
     # Acquire lock manually before running pipeline (simulating concurrent execution)

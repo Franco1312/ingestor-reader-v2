@@ -1,5 +1,4 @@
 """Pipeline orchestrator."""
-import logging
 import time
 from typing import Optional
 import pandas as pd
@@ -7,11 +6,13 @@ import pandas as pd
 from ingestor_reader.domain.entities.dataset_config import DatasetConfig
 from ingestor_reader.domain.entities.app_config import AppConfig
 from ingestor_reader.domain.entities.run import Run
+from ingestor_reader.domain.entities.manifest import SourceFile
 from ingestor_reader.domain.services.pipeline_service import generate_run_id, generate_version_ts
 from ingestor_reader.infra.s3_storage import S3Storage
 from ingestor_reader.infra.s3_catalog import S3Catalog
 from ingestor_reader.infra.event_bus.sns_publisher import SNSPublisher
 from ingestor_reader.infra.locks import DynamoDBLock
+from ingestor_reader.infra.common import get_logger
 from ingestor_reader.use_cases.steps.fetch_resource import fetch_resource, compute_file_hash
 from ingestor_reader.use_cases.steps.check_source_changed import check_source_changed
 from ingestor_reader.use_cases.steps.parse_file import parse_file
@@ -24,16 +25,7 @@ from ingestor_reader.use_cases.steps.publish_version import publish_version
 from ingestor_reader.use_cases.steps.consolidate_projection import consolidate_projection_step
 from ingestor_reader.use_cases.steps.notify_consumers import notify_consumers
 
-logger = logging.getLogger(__name__)
-
-
-
-if not logging.getLogger().handlers:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
+logger = get_logger(__name__)
 
 
 def _get_lock_manager(app_config: AppConfig) -> DynamoDBLock | None:
@@ -104,7 +96,11 @@ def run_pipeline(
             return run
     
     try:
-    
+        # Verify pointer-index consistency and rebuild if needed
+        if not catalog.verify_pointer_index_consistency(config.dataset_id):
+            logger.warning("Pointer-index inconsistency detected, rebuilding index...")
+            catalog.rebuild_index_from_pointer(config.dataset_id)
+            logger.info("Index rebuilt successfully")
 
         content, file_hash, file_size = step_fetch_resource(
             config, app_config
@@ -315,7 +311,6 @@ def step_publish_version(
         output_keys,
         rows_added,
         config.normalize.primary_keys,
-        config.lag_days,
         current_index_df,
         delta_df,
         current_etag,

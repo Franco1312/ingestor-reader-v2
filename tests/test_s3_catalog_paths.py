@@ -16,16 +16,24 @@ def test_s3_catalog_paths():
     catalog = S3Catalog(s3_storage)
     
     dataset_id = "TEST_DATASET"
-    run_id = "run-123"
     version_ts = "2024-01-01T00-00-00"
     
-    # Test path methods (private, but we can verify structure)
-    assert "datasets" in catalog._config_key(dataset_id)
-    assert dataset_id in catalog._config_key(dataset_id)
-    assert "index" in catalog._index_key(dataset_id)
-    assert "events" in catalog._event_manifest_key(dataset_id, version_ts)
-    assert "current" in catalog._current_manifest_key(dataset_id)
-    assert "events" in catalog._events_prefix(dataset_id, version_ts)
+    # Test path methods using public methods
+    config_key = catalog.paths.config_key(dataset_id)
+    assert "datasets" in config_key
+    assert dataset_id in config_key
+    
+    index_key = catalog.paths.index_key(dataset_id)
+    assert "index" in index_key
+    
+    event_manifest_key = catalog.paths.event_manifest_key(dataset_id, version_ts)
+    assert "events" in event_manifest_key
+    
+    current_manifest_key = catalog.paths.current_manifest_key(dataset_id)
+    assert "current" in current_manifest_key
+    
+    events_prefix = catalog.paths.events_prefix(dataset_id, version_ts)
+    assert "events" in events_prefix
 
 
 def test_get_current_manifest_etag():
@@ -119,11 +127,11 @@ def test_read_write_index():
     s3_storage = Mock(spec=S3Storage)
     catalog = S3Catalog(s3_storage)
     
-    # Mock parquet IO
+    # Mock parquet IO on the internal store
     df = pd.DataFrame({"key_hash": ["hash1", "hash2"]})
-    catalog.parquet_io = Mock()
-    catalog.parquet_io.write_to_bytes = Mock(return_value=b"parquet-data")
-    catalog.parquet_io.read_from_bytes = Mock(return_value=df)
+    catalog._index_store.parquet_io = Mock()
+    catalog._index_store.parquet_io.write_to_bytes = Mock(return_value=b"parquet-data")
+    catalog._index_store.parquet_io.read_from_bytes = Mock(return_value=df)
     
     # Test write
     catalog.write_index("TEST", df)
@@ -149,8 +157,8 @@ def test_write_events():
     catalog = S3Catalog(s3_storage)
     
     df = pd.DataFrame({"col1": [1, 2, 3]})
-    catalog.parquet_io = Mock()
-    catalog.parquet_io.write_to_bytes = Mock(return_value=b"parquet-data")
+    catalog._event_store.parquet_io = Mock()
+    catalog._event_store.parquet_io.write_to_bytes = Mock(return_value=b"parquet-data")
     
     keys = catalog.write_events("TEST", "v1", df)
     
